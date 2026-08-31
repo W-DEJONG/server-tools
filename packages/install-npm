@@ -1,0 +1,19 @@
+#!/bin/bash
+set -eo pipefail
+
+# shellcheck disable=SC1091
+source "$SERVER_TOOL_ROOT/lib/common"
+
+confirm_or_exit "This will install Node.js and npm. Do you want to proceed? (y/n): "
+
+resolve_versions "$SERVER_TOOL_ROOT/templates/node-versions" \
+    'Which Node.js LTS version needs to be installed? ' \
+    0 \
+    "$@"
+version="$SELECTED_VERSION"
+echo "Installing Node.js $version and npm..."
+
+ensure_nodesource_repo "$version"
+apt install -y nodejs
+node -v
+npm -v

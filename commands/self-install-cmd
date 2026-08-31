@@ -1,0 +1,10 @@
+#!/bin/bash
+set -eo pipefail
+
+tool_name="server-tool"
+tool_path="$script_dir/$tool_name"
+bin_path="/usr/local/bin/$tool_name"
+
+echo Installing $tool_path in $bin_path
+chmod +x $tool_name
+ln -s "$tool_path" "$bin_path"

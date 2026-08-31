@@ -1,0 +1,299 @@
+#!/bin/bash
+
+require_supported_debian() {
+  if [ ! -f /etc/os-release ]; then
+    echo "Error: cannot determine OS. This tool requires Debian 12 (bookworm) or Debian 13 (trixie)."
+    exit 1
+  fi
+
+  # shellcheck disable=SC1091
+  . /etc/os-release
+
+  if [ "${ID:-}" != "debian" ]; then
+    echo "Error: this tool only supports Debian. Detected: ${ID:-unknown}."
+    exit 1
+  fi
+
+  case "${VERSION_CODENAME:-}" in
+    bookworm|trixie)
+      ;;
+    *)
+      echo "Error: Debian ${VERSION_CODENAME:-unknown} is not supported."
+      echo "Supported releases: Debian 12 (bookworm) and Debian 13 (trixie)."
+      exit 1
+      ;;
+  esac
+}
+
+debian_codename() {
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  printf '%s\n' "$VERSION_CODENAME"
+}
+
+debian_arch() {
+  dpkg --print-architecture
+}
+
+confirm_or_exit() {
+  local message="$1"
+  if [ "${ASSUME_YES:-0}" = "1" ]; then
+    return 0
+  fi
+
+  local confirm
+  read -r -p "$message" confirm
+  if [ "$confirm" != "y" ]; then
+    echo "Script execution aborted."
+    exit 0
+  fi
+}
+
+read_versions_from_file() {
+  local file="$1"
+  local line
+  ALLOWED_VERSIONS=()
+
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    ALLOWED_VERSIONS+=("$line")
+  done < "$file"
+
+  if [ ${#ALLOWED_VERSIONS[@]} -eq 0 ]; then
+    echo "Error: no versions found in $file"
+    exit 1
+  fi
+}
+
+version_is_allowed() {
+  local candidate="$1"
+  local allowed
+  for allowed in "${ALLOWED_VERSIONS[@]}"; do
+    if [ "$candidate" = "$allowed" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+select_version_from_file() {
+  local prompt="$1"
+  local file="$2"
+
+  read_versions_from_file "$file"
+
+  PS3="$prompt"
+  select version in "${ALLOWED_VERSIONS[@]}"; do
+    if [ -n "$version" ]; then
+      SELECTED_VERSION="$version"
+      return 0
+    fi
+    echo "Invalid selection."
+  done
+}
+
+# resolve_versions <versions-file> <prompt> <allow_multiple 0|1> [version ...]
+resolve_versions() {
+  local file="$1"
+  local prompt="$2"
+  local allow_multiple="$3"
+  shift 3
+
+  read_versions_from_file "$file"
+  SELECTED_VERSIONS=()
+
+  if [ $# -gt 0 ]; then
+    local requested
+    for requested in "$@"; do
+      if ! version_is_allowed "$requested"; then
+        echo "Error: unsupported version '$requested'."
+        echo "Available versions: ${ALLOWED_VERSIONS[*]}"
+        exit 1
+      fi
+      SELECTED_VERSIONS+=("$requested")
+    done
+  else
+    select_version_from_file "$prompt" "$file"
+    SELECTED_VERSIONS=("$SELECTED_VERSION")
+  fi
+
+  if [ "$allow_multiple" != "1" ] && [ ${#SELECTED_VERSIONS[@]} -gt 1 ]; then
+    echo "Error: this package accepts only one version."
+    echo "Available versions: ${ALLOWED_VERSIONS[*]}"
+    exit 1
+  fi
+
+  SELECTED_VERSION="${SELECTED_VERSIONS[0]}"
+}
+
+create_postgres_database() {
+  local db_name="$1"
+  CREATED_DB_PASSWORD=""
+  CREATED_DB_IS_NEW=0
+
+  case "$db_name" in
+    postgres|template0|template1|template_postgres|root|admin|replicator|public)
+      echo "Error: refusing to create database '$db_name'"
+      exit 1
+      ;;
+  esac
+
+  if ! [[ "$db_name" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]; then
+    echo "Error: database name may only contain letters, numbers, underscores and hyphens, and must start with a letter or underscore."
+    exit 1
+  fi
+
+  if [ "${#db_name}" -gt 63 ]; then
+    echo "Error: database name must be at most 63 characters."
+    exit 1
+  fi
+
+  if ! command -v psql >/dev/null 2>&1 || ! id postgres &>/dev/null; then
+    echo "Error: PostgreSQL is not installed. Run: server-tool install postgresql"
+    exit 1
+  fi
+
+  if ! systemctl is-active --quiet postgresql; then
+    echo "Error: PostgreSQL is not running."
+    exit 1
+  fi
+
+  local role_exists=0
+  local db_exists=0
+  if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = '$db_name'" | grep -qx 1; then
+    role_exists=1
+  fi
+  if sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname = '$db_name'" | grep -qx 1; then
+    db_exists=1
+  fi
+
+  if [ "$role_exists" -eq 1 ] || [ "$db_exists" -eq 1 ]; then
+    if [ "$role_exists" -eq 1 ]; then
+      echo "PostgreSQL user '$db_name' already exists, leaving password unchanged."
+    fi
+    if [ "$db_exists" -eq 1 ]; then
+      echo "PostgreSQL database '$db_name' already exists, leaving it unchanged."
+    fi
+    return 0
+  fi
+
+  local password
+  if command -v openssl >/dev/null 2>&1; then
+    password="$(openssl rand -hex 16)"
+  else
+    password="$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')"
+  fi
+
+  sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE USER \"${db_name}\" WITH PASSWORD '${password}';"
+  sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${db_name}\" OWNER \"${db_name}\";"
+
+  CREATED_DB_PASSWORD="$password"
+  CREATED_DB_IS_NEW=1
+}
+
+php_fpm_is_installed() {
+  local version="$1"
+  command -v "php-fpm${version}" >/dev/null 2>&1 && [ -d "/etc/php/${version}/fpm/pool.d" ]
+}
+
+ensure_php_fpm() {
+  local version="$1"
+  if php_fpm_is_installed "$version"; then
+    return 0
+  fi
+
+  echo "PHP ${version} FPM is not installed. Installing..."
+  "$SERVER_TOOL_ROOT/server-tool" install php -y "$version"
+}
+
+ensure_sury_php_repo() {
+  apt-get update
+  apt-get -y install lsb-release ca-certificates curl
+  curl -sSLo /tmp/debsuryorg-archive-keyring.deb https://packages.sury.org/debsuryorg-archive-keyring.deb
+  dpkg -i /tmp/debsuryorg-archive-keyring.deb
+  rm -f /tmp/debsuryorg-archive-keyring.deb
+  echo "deb [signed-by=/usr/share/keyrings/debsuryorg-archive-keyring.gpg] https://packages.sury.org/php/ $(debian_codename) main" > /etc/apt/sources.list.d/php.list
+  # Replace the previous trusted.gpg.d key drop used on older installs
+  rm -f /etc/apt/trusted.gpg.d/php.gpg
+  apt-get update
+}
+
+ensure_nodesource_repo() {
+  local node_major="$1"
+  local arch
+
+  arch="$(debian_arch)"
+  if [ "$arch" != "amd64" ] && [ "$arch" != "arm64" ]; then
+    echo "Error: NodeSource only supports amd64 and arm64. Detected: $arch"
+    exit 1
+  fi
+
+  apt-get -y install ca-certificates curl gnupg
+  mkdir -p /usr/share/keyrings
+  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor | tee /usr/share/keyrings/nodesource.gpg >/dev/null
+  chmod 644 /usr/share/keyrings/nodesource.gpg
+
+  cat > /etc/apt/sources.list.d/nodesource.sources <<EOF
+Types: deb
+URIs: https://deb.nodesource.com/node_${node_major}.x
+Suites: nodistro
+Components: main
+Architectures: ${arch}
+Signed-By: /usr/share/keyrings/nodesource.gpg
+EOF
+
+  cat > /etc/apt/preferences.d/nodejs <<EOF
+Package: nodejs
+Pin: origin deb.nodesource.com
+Pin-Priority: 600
+EOF
+
+  apt-get update
+}
+
+ensure_pgdg_repo() {
+  local arch
+
+  arch="$(debian_arch)"
+  apt-get -y install curl ca-certificates
+  install -d /usr/share/postgresql-common/pgdg
+  curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
+
+  cat > /etc/apt/sources.list.d/pgdg.sources <<EOF
+Types: deb
+URIs: https://apt.postgresql.org/pub/repos/apt
+Suites: $(debian_codename)-pgdg
+Architectures: ${arch}
+Components: main
+Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+EOF
+
+  apt-get update
+}
+
+ensure_redis_repo() {
+  apt-get -y install lsb-release curl gpg
+  mkdir -p /usr/share/keyrings
+  curl -fsSL https://packages.redis.io/gpg | gpg --dearmor | tee /usr/share/keyrings/redis-archive-keyring.gpg >/dev/null
+  chmod 644 /usr/share/keyrings/redis-archive-keyring.gpg
+  echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(debian_codename) main" > /etc/apt/sources.list.d/redis.list
+  if ! apt-get update; then
+    echo "Official Redis repo is not available for $(debian_codename); falling back to Debian packages."
+    rm -f /etc/apt/sources.list.d/redis.list
+    apt-get update
+  fi
+}
+
+ensure_mariadb_repo() {
+  apt-get -y install curl ca-certificates
+  curl -LsS https://r.mariadb.com/downloads/mariadb_repo_setup | bash -s -- --mariadb-server-version=mariadb-11.8 --skip-maxscale --skip-tools
+}
+
+ensure_nginx_repo() {
+  apt-get -y install curl gnupg2 ca-certificates lsb-release debian-archive-keyring
+  mkdir -p /usr/share/keyrings
+  curl -fsSL https://nginx.org/keys/nginx_signing.key | gpg --dearmor | tee /usr/share/keyrings/nginx-archive-keyring.gpg >/dev/null
+  echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/debian $(debian_codename) nginx" > /etc/apt/sources.list.d/nginx.list
+  printf 'Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 900\n' > /etc/apt/preferences.d/99nginx
+  apt-get update
+}

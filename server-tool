@@ -1,0 +1,59 @@
+#!/bin/bash
+set -eo pipefail
+
+# Get the directory where the main script is located follow symlinks
+script_dir=$(dirname $(readlink -f ${BASH_SOURCE}))
+export SERVER_TOOL_ROOT="$script_dir"
+# shellcheck disable=SC1091
+source "$script_dir/lib/common"
+
+# Check if at least one argument is provided
+if [ $# -lt 1 ]; then
+    more < "$script_dir/README.md"
+    exit 1
+fi
+
+ASSUME_YES=0
+filtered_args=()
+for arg in "$@"; do
+  case "$arg" in
+    -y|--yes)
+      ASSUME_YES=1
+      ;;
+    *)
+      filtered_args+=("$arg")
+      ;;
+  esac
+done
+export ASSUME_YES
+
+if [ ${#filtered_args[@]} -eq 0 ]; then
+    more < "$script_dir/README.md"
+    exit 1
+fi
+set -- "${filtered_args[@]}"
+
+if [ "$EUID" -ne 0 ]
+  then echo "Please run as root - sudo su"
+  exit
+fi
+
+require_supported_debian
+
+# Extract the script name from the arguments
+script_name=$1-cmd
+
+# Construct the full path to the script in the "scripts" subfolder
+script_path="$script_dir/commands/$script_name"
+
+# Check if the script exists
+if [ ! -e "$script_path" ]; then
+    echo "Error: Unknown Command '$1'."
+    exit 1
+fi
+
+# Shift to remove the script name from the arguments
+shift
+
+# Execute the script with the remaining arguments
+source "$script_path" "$@"

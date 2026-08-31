@@ -1,0 +1,66 @@
+#!/bin/bash
+set -eo pipefail
+
+# Check if at least one argument is provided
+if [ $# -lt 1 ]; then
+    echo "Usage: server-tool delete-user <username> [-y]"
+    exit 1
+fi
+
+username=$1
+home_dir="/home/$username"
+echo "Username: $username"
+
+case "$username" in
+  ""|*/*|root|admin|www-data|nobody|daemon)
+    echo "Error: refusing to delete user '$username'"
+    exit 1
+    ;;
+esac
+
+confirm_or_exit "WARNING! This will delete user $username and $home_dir. Do you want to proceed? (y/n): "
+
+if command -v nginx >/dev/null 2>&1; then
+    rm -f "/etc/nginx/conf.d/${username}.conf"
+    rm -f /etc/nginx/conf.d/${username}_*.conf
+    if systemctl is-active --quiet nginx; then
+        nginx -t && nginx -s reload || echo "Warning: nginx reload failed, continuing cleanup."
+    fi
+fi
+
+if [ -d /etc/php ]; then
+    find /etc/php -type f \( -name "${username}.conf" -o -name "${username}_*.conf" \) -exec rm -f {} +
+    for pool_dir in /etc/php/*/fpm; do
+        [ -d "$pool_dir" ] || continue
+        version="$(basename "$(dirname "$pool_dir")")"
+        if systemctl is-active --quiet "php${version}-fpm"; then
+            systemctl restart "php${version}-fpm" || echo "Warning: php${version}-fpm restart failed, continuing cleanup."
+        fi
+    done
+fi
+rm -f /run/php/php*-fpm-"${username}".sock /run/php/php*-fpm-"${username}"-*.sock
+
+if id "$username" &>/dev/null; then
+    pkill -u "$username" >/dev/null 2>&1 || true
+    sleep 0.5
+    if ! userdel "$username"; then
+        echo "Warning: userdel failed, removing leftover account files."
+    fi
+fi
+
+if [ -e "$home_dir" ]; then
+    echo "Removing $home_dir"
+    rm -rf "$home_dir"
+fi
+rm -f "/var/mail/${username}" "/var/spool/mail/${username}"
+
+if getent group "$username" >/dev/null; then
+    groupdel "$username" || echo "Warning: groupdel failed for $username."
+fi
+
+if id "$username" &>/dev/null || [ -e "$home_dir" ]; then
+    echo "Cleanup incomplete: user or home directory still present."
+    exit 1
+fi
+
+echo "User $username has been removed."

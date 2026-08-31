@@ -1,0 +1,11 @@
+#!/bin/bash
+set -eo pipefail
+
+# shellcheck disable=SC1091
+source "$SERVER_TOOL_ROOT/lib/common"
+
+confirm_or_exit "This will install and configure MariaDB client. Do you want to proceed? (y/n): "
+
+echo "Installing MariaDB client..."
+ensure_mariadb_repo
+apt install -y mariadb-client mariadb-backup

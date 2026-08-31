@@ -1,0 +1,77 @@
+#!/bin/bash
+# Install command script
+set -eo pipefail
+
+packages_dir="$SERVER_TOOL_ROOT/packages"
+usage="Usage: server-tool install <package> [<version> ...] [<package> [<version> ...]] [-y]"
+
+is_package() {
+  [ -e "$packages_dir/install-$1" ]
+}
+
+is_versioned_package() {
+  case "$1" in
+    php|npm|postgresql) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+if [ $# -lt 1 ]; then
+    echo "$usage"
+    exit 1
+fi
+
+pkg_names=()
+pkg_versions=()
+current=""
+
+while [ $# -gt 0 ]; do
+  if is_package "$1"; then
+    pkg_names+=("$1")
+    pkg_versions+=("")
+    current=$((${#pkg_names[@]} - 1))
+    shift
+  elif [ -n "$current" ] && is_versioned_package "${pkg_names[$current]}"; then
+    if [ -n "${pkg_versions[$current]}" ]; then
+      pkg_versions[$current]+=" $1"
+    else
+      pkg_versions[$current]="$1"
+    fi
+    shift
+  else
+    echo "Error: Unknown package '$1'."
+    echo "$usage"
+    exit 1
+  fi
+done
+
+if [ ${#pkg_names[@]} -eq 0 ]; then
+    echo "$usage"
+    exit 1
+fi
+
+if [ ${#pkg_names[@]} -gt 1 ]; then
+    echo "Packages to install:"
+    i=0
+    while [ "$i" -lt ${#pkg_names[@]} ]; do
+      if [ -n "${pkg_versions[$i]}" ]; then
+        echo "  ${pkg_names[$i]} ${pkg_versions[$i]}"
+      else
+        echo "  ${pkg_names[$i]}"
+      fi
+      i=$((i + 1))
+    done
+    confirm_or_exit "This will install the listed packages. Do you want to proceed? (y/n): "
+    ASSUME_YES=1
+    export ASSUME_YES
+fi
+
+i=0
+while [ "$i" -lt ${#pkg_names[@]} ]; do
+  package="${pkg_names[$i]}"
+  versions="${pkg_versions[$i]}"
+  echo "==> Installing $package${versions:+ $versions}"
+  # shellcheck disable=SC2086
+  bash "$packages_dir/install-$package" $versions
+  i=$((i + 1))
+done

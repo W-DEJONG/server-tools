@@ -1,0 +1,32 @@
+#!/bin/bash
+set -eo pipefail
+
+# shellcheck disable=SC1091
+source "$SERVER_TOOL_ROOT/lib/common"
+
+confirm_or_exit "This will install and configure PHP. Do you want to proceed? (y/n): "
+
+ensure_sury_php_repo
+resolve_versions "$SERVER_TOOL_ROOT/templates/php-versions" \
+    'Which version of PHP needs to be installed? ' \
+    1 \
+    "$@"
+
+for version in "${SELECTED_VERSIONS[@]}"; do
+    echo "Installing PHP $version..."
+    apt install -y \
+        php${version}-cli \
+        php${version}-fpm \
+        php${version}-common \
+        php${version}-gd \
+        php${version}-intl \
+        php${version}-curl \
+        php${version}-mbstring \
+        php${version}-mysql \
+        php${version}-pgsql \
+        php${version}-soap \
+        php${version}-zip \
+        php${version}-memcached \
+        php${version}-redis \
+        php${version}-xml
+done

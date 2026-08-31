@@ -1,0 +1,5 @@
+#!/bin/bash
+set -eo pipefail
+
+echo Updating server-tools
+cd "$script_dir" && git pull -v && cd -

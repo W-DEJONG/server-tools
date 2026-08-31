@@ -1,0 +1,39 @@
+#!/bin/bash
+set -eo pipefail
+
+# shellcheck disable=SC1091
+source "$SERVER_TOOL_ROOT/lib/common"
+
+confirm_or_exit "This will install and configure AWS Tooling. Do you want to proceed? (y/n): "
+confirm_or_exit "Is the SSMFFullAccess Policy connected to the EC2 Instance? "
+
+arch="$(debian_arch)"
+case "$arch" in
+  amd64)
+    ssm_arch="amd64"
+    cli_arch="x86_64"
+    ;;
+  arm64)
+    ssm_arch="arm64"
+    cli_arch="aarch64"
+    ;;
+  *)
+    echo "Error: AWS tooling is only packaged for amd64 and arm64. Detected: $arch"
+    exit 1
+    ;;
+esac
+
+apt-get -y install unzip curl
+
+echo "Installing AWS SSM."
+wget "https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/debian_${ssm_arch}/amazon-ssm-agent.deb"
+dpkg -i amazon-ssm-agent.deb
+systemctl enable amazon-ssm-agent
+systemctl start amazon-ssm-agent
+rm amazon-ssm-agent.deb
+echo "Don't forget to attach the IAM role to the EC2 Instance, configure AWS and test if you can make a successful connection.."
+echo "Installing AWS CLI"
+curl "https://awscli.amazonaws.com/awscli-exe-linux-${cli_arch}.zip" -o "awscliv2.zip"
+unzip awscliv2.zip
+rm awscliv2.zip
+./aws/install -i /usr/local/aws-cli -b /usr/local/bin

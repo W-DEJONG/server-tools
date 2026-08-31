@@ -1,0 +1,56 @@
+#!/bin/bash
+set -eo pipefail
+
+php_version=""
+positionals=()
+usage="Usage: server-tool create-user <username> [-p <php-version>] [-y]"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -p|--php)
+      if [ -z "${2:-}" ]; then
+        echo "Error: -p requires a PHP version"
+        echo "$usage"
+        exit 1
+      fi
+      php_version="$2"
+      shift 2
+      ;;
+    *)
+      positionals+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ ${#positionals[@]} -ne 1 ]; then
+    echo "$usage"
+    exit 1
+fi
+
+username="${positionals[0]}"
+echo "Username: $username"
+
+confirm_or_exit "This will create a new application user with it's own group. Do you want to proceed? (y/n): "
+
+if [ -n "$php_version" ]; then
+    resolve_versions "$script_dir/templates/php-versions" \
+        'Which version of PHP needs to be installed? ' \
+        0 \
+        "$php_version"
+    echo "Installing PHP $SELECTED_VERSION for later application pools..."
+    ensure_php_fpm "$SELECTED_VERSION"
+fi
+
+echo 'Creating linux user and group'
+groupadd "$username"
+useradd -g "$username" -m -s /bin/bash "$username"
+echo "alias ll='ls -lh'" >>  "/home/$username/.bashrc"
+
+# Add user to www-data group ( to allow cachetool to clear opcache )
+usermod -a -G www-data "$username"
+
+echo 'Creating SSH keys'
+mkdir -m700 "/home/$username/.ssh"
+ssh-keygen -b 4096 -N "" -f "/home/$username/.ssh/$username"
+cp "/home/$username/.ssh/$username.pub" "/home/$username/.ssh/authorized_keys"
+chown -R "$username:$username" "/home/$username/.ssh"

@@ -1,0 +1,165 @@
+#!/bin/bash
+set -eo pipefail
+
+create_user=0
+db_name=""
+php_version=""
+positionals=()
+usage="Usage: server-tool create-app <username> <application> [-u] [-d <db_name>] [-p <php-version>] [-y]"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -u|--create-user)
+      create_user=1
+      shift
+      ;;
+    -d|--database)
+      if [ -z "${2:-}" ]; then
+        echo "Error: -d requires a database name"
+        echo "$usage"
+        exit 1
+      fi
+      db_name="$2"
+      shift 2
+      ;;
+    -p|--php)
+      if [ -z "${2:-}" ]; then
+        echo "Error: -p requires a PHP version"
+        echo "$usage"
+        exit 1
+      fi
+      php_version="$2"
+      shift 2
+      ;;
+    *)
+      positionals+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ ${#positionals[@]} -ne 2 ]; then
+    echo "$usage"
+    exit 1
+fi
+
+username="${positionals[0]}"
+app_name="${positionals[1]}"
+
+echo "Username: $username"
+echo "Application: $app_name"
+if [ "$create_user" -eq 1 ]; then
+  echo "Create user: yes"
+fi
+if [ -n "$db_name" ]; then
+  echo "Database: $db_name"
+fi
+
+if [ "$create_user" -eq 1 ] || [ -n "$db_name" ]; then
+  confirm_or_exit "This will create the application (and requested user/database). Do you want to proceed? (y/n): "
+else
+  confirm_or_exit "This will create a new application folder structure and configuration. Do you want to proceed? (y/n): "
+fi
+
+if [ "$create_user" -eq 1 ]; then
+  if id "$username" &>/dev/null; then
+    echo "User $username already exists, skipping create-user."
+  else
+    echo "Creating user $username via create-user..."
+    if [ -n "$php_version" ]; then
+      "$SERVER_TOOL_ROOT/server-tool" create-user -y "$username" -p "$php_version"
+    else
+      "$SERVER_TOOL_ROOT/server-tool" create-user -y "$username"
+    fi
+  fi
+fi
+
+if ! id "$username" &>/dev/null; then
+    echo 'user not found'
+    exit 1
+fi
+
+if [ -n "$php_version" ]; then
+    resolve_versions "$SERVER_TOOL_ROOT/templates/php-versions" \
+        'Which PHP version should this application use? ' \
+        0 \
+        "$php_version"
+else
+    resolve_versions "$SERVER_TOOL_ROOT/templates/php-versions" \
+        'Which PHP version should this application use? ' \
+        0
+fi
+php_version="$SELECTED_VERSION"
+ensure_php_fpm "$php_version"
+
+user_root="/home/$username"
+app_root="$user_root/$app_name"
+
+if [ -d "$app_root" ]; then
+  echo "Application $app_name already exists."
+  exit 1
+fi
+echo "Application root: $app_root"
+echo "PHP version: $php_version"
+
+if [ -n "$db_name" ]; then
+  echo "Creating database $db_name..."
+  create_postgres_database "$db_name"
+fi
+
+# Setup nginx config for the application
+mkdir "$app_root"
+mkdir "$app_root/nginx"
+mkdir "$app_root/php-fpm"
+mkdir "$app_root/current"
+mkdir "$app_root/current/public"
+mkdir "$app_root/cron"
+mkdir "$app_root/log"
+
+if [ -n "$db_name" ] && [ "${CREATED_DB_IS_NEW:-0}" -eq 1 ]; then
+  cat > "$app_root/.env.db" <<EOF
+DB_CONNECTION=pgsql
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_DATABASE=$db_name
+DB_USERNAME=$db_name
+DB_PASSWORD=$CREATED_DB_PASSWORD
+EOF
+  chmod 640 "$app_root/.env.db"
+fi
+
+cat > "$app_root/php-fpm/${app_name}.conf" <<EOF
+[${username}_${app_name}]
+user = $username
+group = $username
+listen = /run/php/php${php_version}-fpm-${username}-${app_name}.sock
+listen.owner = www-data
+listen.group = www-data
+pm = dynamic
+pm.max_children = 5
+pm.start_servers = 2
+pm.min_spare_servers = 1
+pm.max_spare_servers = 3
+EOF
+mkdir -p "/etc/php/$php_version/fpm/pool.d"
+echo "include=$app_root/php-fpm/${app_name}.conf" > "/etc/php/$php_version/fpm/pool.d/${username}_${app_name}.conf"
+
+sed -e "s|{{USERNAME}}|$username|g" \
+    -e "s|{{APP_NAME}}|$app_name|g" \
+    -e "s|{{APP_ROOT}}|$app_root|g" \
+    -e "s|{{PHP_VERSION}}|$php_version|g" \
+    "$SERVER_TOOL_ROOT/templates/nginx-laravel.conf" \
+    > "$app_root/nginx/${app_name}.conf"
+
+chown -R "$username:$username" "$app_root"
+
+echo "include $app_root/nginx/*.conf;" > "/etc/nginx/conf.d/${username}_${app_name}.conf"
+
+php-fpm${php_version} -tt
+systemctl restart php${php_version}-fpm
+
+nginx -t
+nginx -s reload
+
+if [ -n "$db_name" ] && [ "${CREATED_DB_IS_NEW:-0}" -eq 1 ]; then
+  echo "Database credentials written to $app_root/.env.db"
+fi

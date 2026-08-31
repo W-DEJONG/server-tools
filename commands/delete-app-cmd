@@ -1,0 +1,63 @@
+#!/bin/bash
+set -eo pipefail
+
+if [ $# -lt 2 ]; then
+    echo "Usage: server-tool delete-app <username> <application> [-y]"
+    exit 1
+fi
+
+username=$1
+app_name=$2
+home_dir="/home/$username"
+app_root="$home_dir/$app_name"
+nginx_conf="/etc/nginx/conf.d/${username}_${app_name}.conf"
+
+echo "Username: $username"
+echo "Application: $app_name"
+
+case "$username" in
+  ""|*/*|root|admin|www-data|nobody|daemon)
+    echo "Error: refusing to delete an application for user '$username'"
+    exit 1
+    ;;
+esac
+
+case "$app_name" in
+  ""|*/*|.|..|.ssh)
+    echo "Error: refusing to delete application '$app_name'"
+    exit 1
+    ;;
+esac
+
+confirm_or_exit "WARNING! This will delete $app_root and its nginx config. Do you want to proceed? (y/n): "
+
+if [ -d /etc/php ]; then
+    find /etc/php -type f -name "${username}_${app_name}.conf" -exec rm -f {} +
+    for pool_dir in /etc/php/*/fpm; do
+        [ -d "$pool_dir" ] || continue
+        version="$(basename "$(dirname "$pool_dir")")"
+        if systemctl is-active --quiet "php${version}-fpm"; then
+            systemctl restart "php${version}-fpm" || echo "Warning: php${version}-fpm restart failed, continuing cleanup."
+        fi
+    done
+fi
+rm -f /run/php/php*-fpm-"${username}-${app_name}".sock
+
+if command -v nginx >/dev/null 2>&1; then
+    rm -f "$nginx_conf"
+    if systemctl is-active --quiet nginx; then
+        nginx -t && nginx -s reload || echo "Warning: nginx reload failed, continuing cleanup."
+    fi
+fi
+
+if [ -e "$app_root" ]; then
+    echo "Removing $app_root"
+    rm -rf "$app_root"
+fi
+
+if [ -e "$app_root" ] || [ -e "$nginx_conf" ]; then
+    echo "Cleanup incomplete: application folder or nginx config still present."
+    exit 1
+fi
+
+echo "Application $app_name has been removed."

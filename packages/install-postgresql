@@ -1,0 +1,19 @@
+#!/bin/bash
+set -eo pipefail
+
+# shellcheck disable=SC1091
+source "$SERVER_TOOL_ROOT/lib/common"
+
+confirm_or_exit "This will install and configure PostgreSQL. Do you want to proceed? (y/n): "
+
+resolve_versions "$SERVER_TOOL_ROOT/templates/postgresql-versions" \
+    'Which version of PostgreSQL needs to be installed? ' \
+    1 \
+    "$@"
+
+ensure_pgdg_repo
+for version in "${SELECTED_VERSIONS[@]}"; do
+    echo "Installing PostgreSQL $version..."
+    apt install -y postgresql-${version} postgresql-client-${version}
+done
+systemctl enable --now postgresql

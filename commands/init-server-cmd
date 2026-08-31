@@ -1,0 +1,24 @@
+#!/bin/bash
+set -eo pipefail
+
+confirm_or_exit "This will configure your server with the default packages and settings. Do you want to proceed? (y/n): "
+
+echo "Initialising server configuration for Debian $(debian_codename)..."
+
+# Base initialisation Debian
+timedatectl set-timezone UTC
+if [ -f /root/.bashrc ]; then
+    echo "alias ll='ls -lh'" >> /root/.bashrc
+    echo "alias become='sudo su -l'" >> /root/.bashrc
+fi
+if [ -d /home/admin ]; then
+    echo "alias ll='ls -lh'" >> /home/admin/.bashrc
+    echo "alias become='sudo su -l'" >> /home/admin/.bashrc
+fi
+chmod 755 /home
+
+# install common tools & SURY repo for current PHP releases
+apt-get update
+apt-get -y install htop dnsutils lsb-release ca-certificates curl gnupg supervisor cron rsync python3-pip magic-wormhole certbot zip unzip telnet acl openssh-client
+ensure_sury_php_repo
+DEBIAN_FRONTEND=noninteractive apt-get -y -o Dpkg::Options::=--force-confold upgrade
