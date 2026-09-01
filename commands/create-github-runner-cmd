@@ -1,0 +1,178 @@
+#!/bin/bash
+set -eo pipefail
+
+runner_name=""
+runner_labels=""
+username="github-runner"
+positionals=()
+usage="Usage: server-tool create-github-runner <url> <token> [-n <name>] [-l <labels>] [-u <username>] [-y]"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -n|--name)
+      if [ -z "${2:-}" ]; then
+        echo "Error: -n requires a runner name"
+        echo "$usage"
+        exit 1
+      fi
+      runner_name="$2"
+      shift 2
+      ;;
+    -l|--labels)
+      if [ -z "${2:-}" ]; then
+        echo "Error: -l requires a comma-separated list of labels"
+        echo "$usage"
+        exit 1
+      fi
+      runner_labels="$2"
+      shift 2
+      ;;
+    -u|--user)
+      if [ -z "${2:-}" ]; then
+        echo "Error: -u requires a username"
+        echo "$usage"
+        exit 1
+      fi
+      username="$2"
+      shift 2
+      ;;
+    *)
+      positionals+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ ${#positionals[@]} -ne 2 ]; then
+  echo "$usage"
+  exit 1
+fi
+
+github_url="${positionals[0]}"
+runner_token="${positionals[1]}"
+
+if ! [[ "$github_url" =~ ^https://github\.com/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)?$ ]]; then
+  echo "Error: URL must be https://github.com/<org> or https://github.com/<org>/<repo>"
+  exit 1
+fi
+
+if [ -z "$runner_token" ] || [[ "$runner_token" =~ [[:space:]] ]]; then
+  echo "Error: a registration token is required."
+  exit 1
+fi
+
+if [ "$username" = "root" ]; then
+  echo "Error: refusing to run the GitHub runner as root."
+  exit 1
+fi
+
+if ! [[ "$username" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+  echo "Error: username may only contain lowercase letters, numbers, underscores and hyphens, and must start with a letter or underscore."
+  exit 1
+fi
+
+arch="$(debian_arch)"
+case "$arch" in
+  amd64) runner_plat="linux-x64" ;;
+  arm64) runner_plat="linux-arm64" ;;
+  *)
+    echo "Error: GitHub Actions runner is only packaged for amd64 and arm64. Detected: $arch"
+    exit 1
+    ;;
+esac
+
+if [ -z "$runner_name" ]; then
+  runner_name="$(hostname -s)"
+fi
+
+echo "GitHub URL: $github_url"
+echo "Runner name: $runner_name"
+echo "Linux user: $username"
+if [ -n "$runner_labels" ]; then
+  echo "Labels: $runner_labels"
+fi
+
+confirm_or_exit "This will install a GitHub Actions runner and register it. Do you want to proceed? (y/n): "
+
+if id "$username" &>/dev/null; then
+  echo "User $username already exists, using it."
+else
+  echo "Creating user $username..."
+  getent group "$username" >/dev/null || groupadd "$username"
+  useradd -g "$username" -m -s /bin/bash "$username"
+fi
+
+user_home="$(getent passwd "$username" | cut -d: -f6)"
+if [ -z "$user_home" ] || [ ! -d "$user_home" ]; then
+  echo "Error: home directory for $username not found."
+  exit 1
+fi
+
+runner_dir="$user_home/actions-runner"
+mkdir -p "$runner_dir"
+chown "$username:$username" "$runner_dir"
+
+apt-get -y install curl ca-certificates tar
+
+if [ ! -x "$runner_dir/config.sh" ]; then
+  echo "Downloading latest GitHub Actions runner..."
+  latest_url="$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/actions/runner/releases/latest)"
+  tag="${latest_url##*/}"
+  version="${tag#v}"
+  if [ -z "$version" ] || [ "$version" = "$latest_url" ]; then
+    echo "Error: could not determine the latest GitHub Actions runner version."
+    exit 1
+  fi
+
+  archive="actions-runner-${runner_plat}-${version}.tar.gz"
+  download_url="https://github.com/actions/runner/releases/download/${tag}/${archive}"
+  echo "Version: $version"
+  curl -fL --retry 3 -o "/tmp/${archive}" "$download_url"
+  tar -xzf "/tmp/${archive}" -C "$runner_dir"
+  rm -f "/tmp/${archive}"
+  chown -R "$username:$username" "$runner_dir"
+fi
+
+if [ -x "$runner_dir/bin/installdependencies.sh" ]; then
+  echo "Installing runner dependencies..."
+  "$runner_dir/bin/installdependencies.sh"
+fi
+
+if [ -f "$runner_dir/.runner" ]; then
+  echo "GitHub runner already configured in $runner_dir, leaving registration unchanged."
+else
+  echo "Registering runner with GitHub..."
+  config_args=(--unattended --url "$github_url" --token "$runner_token" --name "$runner_name" --work _work)
+  if [ -n "$runner_labels" ]; then
+    config_args+=(--labels "$runner_labels")
+  fi
+  (
+    cd "$runner_dir"
+    sudo -u "$username" ./config.sh "${config_args[@]}"
+  )
+fi
+
+if [ ! -f "$runner_dir/.service" ]; then
+  echo "Installing runner service..."
+  (
+    cd "$runner_dir"
+    ./svc.sh install "$username"
+  )
+fi
+
+if [ -d /etc/needrestart/conf.d ]; then
+  echo '$nrconf{override_rc}{qr(^actions\.runner\..+\.service$)} = 0;' > /etc/needrestart/conf.d/actions_runner_services.conf
+fi
+
+(
+  cd "$runner_dir"
+  ./svc.sh start
+)
+
+echo
+echo "GitHub Actions runner is ready."
+echo "  Directory: $runner_dir"
+echo "  User:      $username"
+echo "  Name:      $runner_name"
+echo "  URL:       $github_url"
+echo
+echo "Check status with: $runner_dir/svc.sh status"

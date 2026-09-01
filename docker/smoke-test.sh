@@ -20,6 +20,12 @@ if server-tool definitely-not-a-command; then
     exit 1
 fi
 
+echo "==> create-github-runner requires arguments"
+if server-tool create-github-runner -y; then
+    echo "Expected create-github-runner without arguments to fail"
+    exit 1
+fi
+
 echo "==> init-server"
 server-tool init-server -y
 

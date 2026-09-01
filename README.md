@@ -49,6 +49,8 @@ server-tool create-app <username> <application> [-u] [-d <db_name>] [-p <php-ver
 server-tool create-app testdev demo -u -d mijnapp -p 8.4 -y
 server-tool delete-app <username> <application> [-y]
 server-tool create-db <db_name> [-y]
+server-tool create-github-runner <url> <token> [-n <name>] [-l <labels>] [-u <username>] [-y]
+server-tool create-github-runner https://github.com/my-org AAAA -n web-1 -l deploy -y
 ```
 
 Install:
