@@ -38,6 +38,7 @@ server-tool install postgresql
 server-tool install postgresql -y 17 18
 server-tool install memcached
 server-tool install redis
+server-tool install meilisearch
 server-tool install aws
 server-tool install postgresql redis php 8.4 -y
 

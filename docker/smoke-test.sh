@@ -41,6 +41,11 @@ server-tool install memcached -y
 echo "==> install redis"
 server-tool install redis -y
 
+echo "==> install meilisearch"
+server-tool install meilisearch -y
+systemctl is-active --quiet meilisearch
+curl -sf http://127.0.0.1:7700/health >/dev/null
+
 echo "==> install postgresql ${postgres_version}"
 server-tool install postgresql -y "$postgres_version"
 

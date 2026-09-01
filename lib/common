@@ -289,6 +289,12 @@ ensure_mariadb_repo() {
   curl -LsS https://r.mariadb.com/downloads/mariadb_repo_setup | bash -s -- --mariadb-server-version=mariadb-11.8 --skip-maxscale --skip-tools
 }
 
+ensure_meilisearch_repo() {
+  apt-get -y install ca-certificates
+  echo "deb [trusted=yes] https://apt.fury.io/meilisearch/ /" > /etc/apt/sources.list.d/meilisearch.list
+  apt-get update
+}
+
 ensure_nginx_repo() {
   apt-get -y install curl gnupg2 ca-certificates lsb-release debian-archive-keyring
   mkdir -p /usr/share/keyrings

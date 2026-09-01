@@ -1,0 +1,113 @@
+#!/bin/bash
+set -eo pipefail
+
+# shellcheck disable=SC1091
+source "$SERVER_TOOL_ROOT/lib/common"
+
+confirm_or_exit "This will install and configure Meilisearch. Do you want to proceed? (y/n): "
+
+arch="$(debian_arch)"
+case "$arch" in
+  amd64|arm64)
+    ;;
+  *)
+    echo "Error: Meilisearch is only packaged for amd64 and arm64. Detected: $arch"
+    exit 1
+    ;;
+esac
+
+echo "Installing meilisearch..."
+
+if [ "$arch" = "amd64" ]; then
+  ensure_meilisearch_repo
+  apt install -y meilisearch
+else
+  apt-get -y install curl ca-certificates
+  echo "Official Meilisearch APT repo is amd64-only; installing the arm64 binary from GitHub."
+  curl -fL --retry 3 -o /usr/local/bin/meilisearch \
+    https://github.com/meilisearch/meilisearch/releases/latest/download/meilisearch-linux-aarch64
+  chmod 755 /usr/local/bin/meilisearch
+fi
+
+meili_bin="$(command -v meilisearch || true)"
+if [ -z "$meili_bin" ]; then
+  echo "Error: meilisearch binary not found after install."
+  exit 1
+fi
+
+if ! id meilisearch &>/dev/null; then
+  useradd --system --home-dir /var/lib/meilisearch --shell /usr/sbin/nologin --comment "Meilisearch" meilisearch
+fi
+
+mkdir -p /var/lib/meilisearch/data /var/lib/meilisearch/dumps /var/lib/meilisearch/snapshots
+chown -R meilisearch:meilisearch /var/lib/meilisearch
+chmod 750 /var/lib/meilisearch
+
+config_path="/etc/meilisearch.toml"
+created_master_key=""
+if [ -f "$config_path" ]; then
+  echo "Meilisearch config $config_path already exists, leaving it unchanged."
+else
+  if command -v openssl >/dev/null 2>&1; then
+    created_master_key="$(openssl rand -hex 32)"
+  else
+    created_master_key="$(dd if=/dev/urandom bs=32 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')"
+  fi
+
+  cat > "$config_path" <<EOF
+env = "production"
+master_key = "$created_master_key"
+db_path = "/var/lib/meilisearch/data"
+dump_dir = "/var/lib/meilisearch/dumps"
+snapshot_dir = "/var/lib/meilisearch/snapshots"
+http_addr = "127.0.0.1:7700"
+EOF
+  chown root:meilisearch "$config_path"
+  chmod 640 "$config_path"
+fi
+
+unit_exists=0
+for unit_path in \
+  /etc/systemd/system/meilisearch.service \
+  /usr/lib/systemd/system/meilisearch.service \
+  /lib/systemd/system/meilisearch.service
+do
+  if [ -f "$unit_path" ]; then
+    unit_exists=1
+    break
+  fi
+done
+
+if [ "$unit_exists" -eq 1 ]; then
+  echo "Meilisearch systemd unit already exists, leaving it unchanged."
+else
+  cat > /etc/systemd/system/meilisearch.service <<EOF
+[Unit]
+Description=Meilisearch
+After=network.target
+
+[Service]
+Type=simple
+User=meilisearch
+Group=meilisearch
+WorkingDirectory=/var/lib/meilisearch
+ExecStart=$meili_bin --config-file-path $config_path
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+fi
+
+systemctl enable --now meilisearch
+
+echo
+echo "Meilisearch is ready."
+echo "  Listen:  127.0.0.1:7700"
+echo "  Config:  $config_path"
+echo "  Data:    /var/lib/meilisearch/data"
+if [ -n "$created_master_key" ]; then
+  echo "  Master key: $created_master_key"
+  echo "Store this master key now; it is saved in $config_path."
+fi
