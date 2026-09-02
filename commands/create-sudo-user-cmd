@@ -43,12 +43,7 @@ else
         created_password="$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')"
     fi
     echo "$username:$created_password" | chpasswd
-
-    echo "Creating SSH keys"
-    mkdir -m700 "/home/$username/.ssh"
-    ssh-keygen -b 4096 -N "" -f "/home/$username/.ssh/$username"
-    cp "/home/$username/.ssh/$username.pub" "/home/$username/.ssh/authorized_keys"
-    chown -R "$username:$username" "/home/$username/.ssh"
+    chage -d 0 "$username"
 fi
 
 ensure_login_bashrc "/home/$username/.bashrc" 1
@@ -66,7 +61,7 @@ echo "Sudo user is ready."
 echo "  User: $username"
 echo "  Home: /home/$username"
 if [ "$created_user" -eq 1 ]; then
-    echo "  Password: $created_password"
-    echo "  SSH key:  /home/$username/.ssh/$username"
-    echo "Store this password now; it is not saved by server-tool."
+    echo "  Temporary password: $created_password"
+    echo "This password must be changed at first login."
+    echo "Store it now; it is not saved by server-tool."
 fi
