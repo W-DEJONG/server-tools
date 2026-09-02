@@ -1,0 +1,72 @@
+#!/bin/bash
+set -eo pipefail
+
+if [ $# -lt 1 ]; then
+    echo "Usage: server-tool create-sudo-user <username> [-y]"
+    exit 1
+fi
+
+username=$1
+echo "Username: $username"
+
+case "$username" in
+  ""|*/*|root|www-data|nobody|daemon|postgres|mysql|redis|meilisearch)
+    echo "Error: refusing to create sudo user '$username'"
+    exit 1
+    ;;
+esac
+
+if ! [[ "$username" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+    echo "Error: username may only contain lowercase letters, numbers, underscores and hyphens, and must start with a letter or underscore."
+    exit 1
+fi
+
+confirm_or_exit "This will create user $username with sudo rights. Do you want to proceed? (y/n): "
+
+apt-get -y install sudo
+getent group sudo >/dev/null || groupadd sudo
+
+created_user=0
+created_password=""
+
+if id "$username" &>/dev/null; then
+    echo "User $username already exists, leaving the account unchanged."
+else
+    echo "Creating linux user and group"
+    getent group "$username" >/dev/null || groupadd "$username"
+    useradd -g "$username" -m -s /bin/bash "$username"
+    created_user=1
+
+    if command -v openssl >/dev/null 2>&1; then
+        created_password="$(openssl rand -hex 16)"
+    else
+        created_password="$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')"
+    fi
+    echo "$username:$created_password" | chpasswd
+
+    echo "Creating SSH keys"
+    mkdir -m700 "/home/$username/.ssh"
+    ssh-keygen -b 4096 -N "" -f "/home/$username/.ssh/$username"
+    cp "/home/$username/.ssh/$username.pub" "/home/$username/.ssh/authorized_keys"
+    chown -R "$username:$username" "/home/$username/.ssh"
+fi
+
+ensure_login_bashrc "/home/$username/.bashrc" 1
+chown "$username:$username" "/home/$username/.bashrc"
+
+if id -nG "$username" | grep -qw sudo; then
+    echo "User $username already has sudo rights."
+else
+    usermod -aG sudo "$username"
+    echo "Added $username to the sudo group."
+fi
+
+echo
+echo "Sudo user is ready."
+echo "  User: $username"
+echo "  Home: /home/$username"
+if [ "$created_user" -eq 1 ]; then
+    echo "  Password: $created_password"
+    echo "  SSH key:  /home/$username/.ssh/$username"
+    echo "Store this password now; it is not saved by server-tool."
+fi

@@ -62,6 +62,13 @@ sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname = 'smoke_tes
 echo "==> install mariadb-server"
 server-tool install mariadb-server -y
 
+echo "==> create-sudo-user smokeadmin"
+server-tool create-sudo-user smokeadmin -y
+id smokeadmin
+id -nG smokeadmin | grep -qw sudo
+test -f /home/smokeadmin/.ssh/authorized_keys
+grep -qxF "export LS_OPTIONS='--color=auto'" /home/smokeadmin/.bashrc
+
 echo "==> create-user testdev ${php_version}"
 server-tool create-user testdev -y -p "$php_version"
 

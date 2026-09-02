@@ -49,6 +49,33 @@ confirm_or_exit() {
   fi
 }
 
+ensure_login_bashrc() {
+  local bashrc="$1"
+  local with_become="${2:-0}"
+  local bashrc_dir
+
+  bashrc_dir="$(dirname "$bashrc")"
+  if [ ! -d "$bashrc_dir" ]; then
+    return 0
+  fi
+
+  touch "$bashrc"
+
+  if ! grep -qxF "export LS_OPTIONS='--color=auto'" "$bashrc"; then
+    cat >> "$bashrc" <<'EOF'
+export LS_OPTIONS='--color=auto'
+eval "$(dircolors)"
+alias ls='ls $LS_OPTIONS'
+alias ll='ls $LS_OPTIONS -l'
+alias l='ls $LS_OPTIONS -lA'
+EOF
+  fi
+
+  if [ "$with_become" = "1" ] && ! grep -qxF "alias become='sudo su -l'" "$bashrc"; then
+    echo "alias become='sudo su -l'" >> "$bashrc"
+  fi
+}
+
 read_versions_from_file() {
   local file="$1"
   local line

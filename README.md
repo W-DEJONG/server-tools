@@ -44,6 +44,7 @@ server-tool install postgresql redis php 8.4 -y
 
 # Install web application users and folders
 server-tool create-user <username> [-p <php-version>] [-y]
+server-tool create-sudo-user <username> [-y]
 server-tool delete-user <username> [-y]
 server-tool create-app <username> <application> [-u] [-d <db_name>] [-p <php-version>] [-y]
 server-tool create-app testdev demo -u -d mijnapp -p 8.4 -y
