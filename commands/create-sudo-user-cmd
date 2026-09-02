@@ -44,6 +44,11 @@ else
     fi
     echo "$username:$created_password" | chpasswd
     chage -d 0 "$username"
+
+    mkdir -m700 "/home/$username/.ssh"
+    : > "/home/$username/.ssh/authorized_keys"
+    chmod 600 "/home/$username/.ssh/authorized_keys"
+    chown -R "$username:$username" "/home/$username/.ssh"
 fi
 
 ensure_login_bashrc "/home/$username/.bashrc" 1

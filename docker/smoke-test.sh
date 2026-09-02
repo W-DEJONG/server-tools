@@ -66,7 +66,9 @@ echo "==> create-sudo-user smokeadmin"
 server-tool create-sudo-user smokeadmin -y
 id smokeadmin
 id -nG smokeadmin | grep -qw sudo
-test ! -e /home/smokeadmin/.ssh
+test -d /home/smokeadmin/.ssh
+test -f /home/smokeadmin/.ssh/authorized_keys
+test ! -s /home/smokeadmin/.ssh/authorized_keys
 [ "$(getent shadow smokeadmin | cut -d: -f3)" = "0" ]
 grep -qxF "export LS_OPTIONS='--color=auto'" /home/smokeadmin/.bashrc
 
