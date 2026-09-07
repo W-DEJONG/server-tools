@@ -51,6 +51,7 @@ server-tool create-app testdev demo -u -d mijnapp -p 8.4 -y
 server-tool delete-app <username> <application> [-y]
 server-tool enable-ssl <username> <application> [-d <domain>] [-e <email>] [--self-signed] [--renew] [-y]
 server-tool enable-basic-auth <username> <application> <auth_user> [-r <realm>] [-y]
+server-tool disable-ssh-password [-y]
 server-tool create-horizon <username> <application> [-p <php-version>] [-n <numprocs>] [-y]
 server-tool create-db <db_name> [-y]
 server-tool create-github-runner <url> <token> [-n <name>] [-l <labels>] [-u <username>] [-y]

@@ -76,6 +76,13 @@ echo "==> create-user testdev ${php_version}"
 server-tool create-user testdev -y -p "$php_version"
 id -nG testdev | grep -qw nginx
 
+echo "==> disable-ssh-password"
+server-tool disable-ssh-password -y
+grep -q '^PasswordAuthentication no' /etc/ssh/sshd_config.d/10-server-tool.conf
+grep -q '^KbdInteractiveAuthentication no' /etc/ssh/sshd_config.d/10-server-tool.conf
+grep -q '^PubkeyAuthentication yes' /etc/ssh/sshd_config.d/10-server-tool.conf
+sshd -t
+
 echo "==> create-app testdev demo"
 server-tool create-app testdev demo -y
 
