@@ -52,6 +52,6 @@ usermod -a -G nginx "$username"
 
 echo 'Creating SSH keys'
 mkdir -m700 "/home/$username/.ssh"
-ssh-keygen -b 4096 -N "" -f "/home/$username/.ssh/$username"
+ssh-keygen -b 4096 -N "" -f "/home/$username/.ssh/$username" -C "$username@$(hostname)"
 cp "/home/$username/.ssh/$username.pub" "/home/$username/.ssh/authorized_keys"
 chown -R "$username:$username" "/home/$username/.ssh"
