@@ -16,7 +16,7 @@ echo "Username: $username"
 echo "Application: $app_name"
 
 case "$username" in
-  ""|*/*|root|admin|www-data|nobody|daemon)
+  ""|*/*|root|admin|www-data|nginx|nobody|daemon)
     echo "Error: refusing to delete an application for user '$username'"
     exit 1
     ;;

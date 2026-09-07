@@ -8,6 +8,10 @@ confirm_or_exit "This will install and configure nginx. Do you want to proceed? 
 
 echo "Installing nginx..."
 ensure_nginx_repo
-apt install -y nginx certbot python3-certbot-nginx
+apt install -y nginx certbot python3-certbot-nginx ufw
 systemctl enable nginx
 systemctl start nginx
+
+echo "Allowing HTTP and HTTPS in ufw..."
+ufw allow 80/tcp
+ufw allow 443/tcp

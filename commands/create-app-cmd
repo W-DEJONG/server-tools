@@ -110,10 +110,16 @@ fi
 mkdir "$app_root"
 mkdir "$app_root/nginx"
 mkdir "$app_root/php-fpm"
-mkdir "$app_root/current"
-mkdir "$app_root/current/public"
+mkdir "$app_root/releases"
+mkdir "$app_root/install"
+mkdir "$app_root/install/public"
 mkdir "$app_root/cron"
 mkdir "$app_root/log"
+ln -s install "$app_root/current"
+cat > "$app_root/install/public/index.php" <<'EOF'
+<?php
+phpinfo();
+EOF
 
 if [ -n "$db_name" ] && [ "${CREATED_DB_IS_NEW:-0}" -eq 1 ]; then
   cat > "$app_root/.env.db" <<EOF
@@ -132,8 +138,8 @@ cat > "$app_root/php-fpm/${app_name}.conf" <<EOF
 user = $username
 group = $username
 listen = /run/php/php${php_version}-fpm-${username}-${app_name}.sock
-listen.owner = www-data
-listen.group = www-data
+listen.owner = nginx
+listen.group = nginx
 pm = dynamic
 pm.max_children = 5
 pm.start_servers = 2
@@ -151,6 +157,7 @@ sed -e "s|{{USERNAME}}|$username|g" \
     > "$app_root/nginx/${app_name}.conf"
 
 chown -R "$username:$username" "$app_root"
+apply_app_nginx_acl "$username" "$app_root"
 
 echo "include $app_root/nginx/*.conf;" > "/etc/nginx/conf.d/${username}_${app_name}.conf"
 

@@ -12,7 +12,7 @@ home_dir="/home/$username"
 echo "Username: $username"
 
 case "$username" in
-  ""|*/*|root|admin|www-data|nobody|daemon)
+  ""|*/*|root|admin|www-data|nginx|nobody|daemon)
     echo "Error: refusing to delete user '$username'"
     exit 1
     ;;

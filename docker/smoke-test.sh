@@ -74,18 +74,31 @@ grep -qxF "export LS_OPTIONS='--color=auto'" /home/smokeadmin/.bashrc
 
 echo "==> create-user testdev ${php_version}"
 server-tool create-user testdev -y -p "$php_version"
+id -nG testdev | grep -qw nginx
 
 echo "==> create-app testdev demo"
 server-tool create-app testdev demo -y
 
 echo "==> verify application layout"
-test -d /home/testdev/demo/current/public
+test -d /home/testdev/demo/install/public
+test -L /home/testdev/demo/current
+test "$(readlink /home/testdev/demo/current)" = install
+test -f /home/testdev/demo/current/public/index.php
+grep -q "phpinfo();" /home/testdev/demo/install/public/index.php
+test -d /home/testdev/demo/releases
+getfacl /home/testdev/demo/install | grep -q "user:nginx:r-x"
 test -d /home/testdev/demo/nginx
+getfacl /home/testdev | grep -q "user:nginx:--x"
+getfacl /home/testdev/demo | grep -q "user:nginx:--x"
+getfacl /home/testdev/demo/releases | grep -q "user:nginx:r-x"
+getfacl /home/testdev/demo/releases | grep -q "default:user:nginx:r-x"
 test -f /home/testdev/demo/php-fpm/demo.conf
 test -f /home/testdev/demo/nginx/demo.conf
 grep -q "current/public" /home/testdev/demo/nginx/demo.conf
 grep -q "php${php_version}-fpm-testdev-demo.sock" /home/testdev/demo/nginx/demo.conf
 grep -q "php${php_version}-fpm-testdev-demo.sock" /home/testdev/demo/php-fpm/demo.conf
+grep -q "listen.owner = nginx" /home/testdev/demo/php-fpm/demo.conf
+grep -q "listen.group = nginx" /home/testdev/demo/php-fpm/demo.conf
 test -f /etc/php/${php_version}/fpm/pool.d/testdev_demo.conf
 test -f /etc/nginx/conf.d/testdev_demo.conf
 

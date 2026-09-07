@@ -46,8 +46,9 @@ groupadd "$username"
 useradd -g "$username" -m -s /bin/bash "$username"
 echo "alias ll='ls -lh'" >>  "/home/$username/.bashrc"
 
-# Add user to www-data group ( to allow cachetool to clear opcache )
-usermod -a -G www-data "$username"
+# Add user to nginx group (so cachetool can reach the FPM socket)
+getent group nginx >/dev/null || groupadd --system nginx
+usermod -a -G nginx "$username"
 
 echo 'Creating SSH keys'
 mkdir -m700 "/home/$username/.ssh"

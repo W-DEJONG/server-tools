@@ -10,7 +10,7 @@ username=$1
 echo "Username: $username"
 
 case "$username" in
-  ""|*/*|root|www-data|nobody|daemon|postgres|mysql|redis|meilisearch)
+  ""|*/*|root|www-data|nginx|nobody|daemon|postgres|mysql|redis|meilisearch)
     echo "Error: refusing to create sudo user '$username'"
     exit 1
     ;;

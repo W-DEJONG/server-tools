@@ -218,6 +218,68 @@ create_postgres_database() {
   CREATED_DB_IS_NEW=1
 }
 
+apply_app_nginx_acl() {
+  local username="$1"
+  local app_root="$2"
+  local user_home="/home/${username}"
+  local releases="${app_root}/releases"
+  local nginx_user="nginx"
+
+  if ! command -v setfacl >/dev/null 2>&1; then
+    echo "Installing acl for nginx folder permissions..."
+    apt-get -y install acl
+  fi
+
+  if ! id "$nginx_user" &>/dev/null; then
+    echo "Error: nginx user not found. Run: server-tool install nginx"
+    exit 1
+  fi
+
+  if [ ! -d "$user_home" ]; then
+    echo "Error: home directory does not exist: $user_home"
+    exit 1
+  fi
+
+  if [ ! -d "$app_root" ]; then
+    echo "Error: application directory does not exist: $app_root"
+    exit 1
+  fi
+
+  mkdir -p "$releases"
+  chown "$username:$username" "$releases"
+
+  echo "Setting ACL permissions for $app_root"
+  setfacl -m "u:${nginx_user}:--x" "$user_home"
+  setfacl -m "u:${nginx_user}:--x" "$app_root"
+  setfacl -R -m "u:${nginx_user}:rX" "$releases"
+  setfacl -R -m "d:u:${nginx_user}:rX" "$releases"
+
+  if [ -d "$app_root/install" ]; then
+    setfacl -R -m "u:${nginx_user}:rX" "$app_root/install"
+    setfacl -R -m "d:u:${nginx_user}:rX" "$app_root/install"
+  fi
+
+  if [ -d "$app_root/current" ] && [ ! -L "$app_root/current" ]; then
+    setfacl -R -m "u:${nginx_user}:rX" "$app_root/current"
+    setfacl -R -m "d:u:${nginx_user}:rX" "$app_root/current"
+  fi
+
+  if [ -d "$app_root/log" ]; then
+    setfacl -R -m "u:${nginx_user}:rwX" "$app_root/log"
+    setfacl -R -m "d:u:${nginx_user}:rwX" "$app_root/log"
+  fi
+
+  local current_index="${app_root}/current/public/index.php"
+  if [ -e "$current_index" ]; then
+    if sudo -u "$nginx_user" test -r "$current_index"; then
+      echo "OK: ${nginx_user} can read ${current_index}"
+    else
+      echo "Error: ${nginx_user} cannot read ${current_index}"
+      exit 1
+    fi
+  fi
+}
+
 php_fpm_is_installed() {
   local version="$1"
   command -v "php-fpm${version}" >/dev/null 2>&1 && [ -d "/etc/php/${version}/fpm/pool.d" ]
