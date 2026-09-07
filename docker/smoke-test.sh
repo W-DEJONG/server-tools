@@ -85,6 +85,11 @@ grep -qxF "$(cat /tmp/smokenopass.pub)" /home/smokenopass/.ssh/authorized_keys
 echo "==> create-user testdev ${php_version}"
 server-tool create-user testdev -y -p "$php_version"
 id -nG testdev | grep -qw nginx
+grep -qxF "export LS_OPTIONS='--color=auto'" /home/testdev/.bashrc
+grep -qxF "alias ls='ls \$LS_OPTIONS'" /home/testdev/.bashrc
+grep -qxF "alias ll='ls \$LS_OPTIONS -l'" /home/testdev/.bashrc
+grep -qxF "alias l='ls \$LS_OPTIONS -lA'" /home/testdev/.bashrc
+grep -qxF "alias art='./artisan'" /home/testdev/.bashrc
 
 echo "==> disable-ssh-password"
 server-tool disable-ssh-password -y

@@ -44,7 +44,11 @@ fi
 echo 'Creating linux user and group'
 groupadd "$username"
 useradd -g "$username" -m -s /bin/bash "$username"
-echo "alias ll='ls -lh'" >>  "/home/$username/.bashrc"
+ensure_login_bashrc "/home/$username/.bashrc" 0
+if ! grep -qxF "alias art='./artisan'" "/home/$username/.bashrc"; then
+    echo "alias art='./artisan'" >> "/home/$username/.bashrc"
+fi
+chown "$username:$username" "/home/$username/.bashrc"
 
 # Add user to nginx group (so cachetool can reach the FPM socket)
 getent group nginx >/dev/null || groupadd --system nginx
