@@ -116,6 +116,10 @@ test -f /home/testdev/demo/nginx/ssl/demo.example.test.pem
 test -f /home/testdev/demo/nginx/ssl/demo.example.test.key
 grep -q "return 301 https" /home/testdev/demo/nginx/demo.conf
 
+echo "==> enable-ssl testdev demo --self-signed --renew"
+server-tool enable-ssl testdev demo -d demo.example.test --self-signed --renew -y
+openssl x509 -in /home/testdev/demo/nginx/ssl/demo.example.test.pem -noout -checkend $((86400 * 365 * 14))
+
 echo "==> delete-app testdev demo"
 server-tool delete-app testdev demo -y
 test ! -e /home/testdev/demo

@@ -2,10 +2,11 @@
 set -eo pipefail
 
 self_signed=0
+renew=0
 domain=""
 email=""
 positionals=()
-usage="Usage: server-tool enable-ssl <username> <application> [-d <domain>] [-e <email>] [--self-signed] [-y]"
+usage="Usage: server-tool enable-ssl <username> <application> [-d <domain>] [-e <email>] [--self-signed] [--renew] [-y]"
 while [ $# -gt 0 ]; do
   case "$1" in
     -d|--domain)
@@ -28,6 +29,10 @@ while [ $# -gt 0 ]; do
       ;;
     --self-signed)
       self_signed=1
+      shift
+      ;;
+    --renew)
+      renew=1
       shift
       ;;
     *)
@@ -64,6 +69,10 @@ if ! [[ "$domain" =~ ^[A-Za-z0-9._-]+$ ]]; then
   exit 1
 fi
 
+if [ "$renew" -eq 1 ] && [ "$self_signed" -eq 0 ] && [ ! -d "/etc/letsencrypt/live/${domain}" ]; then
+  self_signed=1
+fi
+
 echo "Username: $username"
 echo "Application: $app_name"
 echo "Domain: $domain"
@@ -75,57 +84,99 @@ else
   echo "Certificate: Let's Encrypt"
 fi
 
-confirm_or_exit "This will enable HTTPS for $app_name. Do you want to proceed? (y/n): "
+if [ "$renew" -eq 1 ]; then
+  confirm_or_exit "This will renew the HTTPS certificate for $app_name. Do you want to proceed? (y/n): "
+else
+  confirm_or_exit "This will enable HTTPS for $app_name. Do you want to proceed? (y/n): "
+fi
 
 ssl_dir="$APP_ROOT/nginx/ssl"
 ssl_cert="$ssl_dir/${domain}.pem"
 ssl_key="$ssl_dir/${domain}.key"
 mkdir -p "$ssl_dir"
 
-if grep -q 'listen 443' "$APP_NGINX_CONF"; then
-  echo "SSL is already enabled in $APP_NGINX_CONF, leaving the nginx config unchanged."
-else
-  if [ ! -f "$ssl_cert" ] || [ ! -f "$ssl_key" ]; then
-    if [ "$self_signed" -eq 1 ]; then
-      echo "Creating self-signed certificate..."
-      openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-        -keyout "$ssl_key" \
-        -out "$ssl_cert" \
-        -subj "/CN=${domain}"
-    else
-      if ! command -v certbot >/dev/null 2>&1; then
-        echo "Error: certbot is not installed. Run: server-tool install nginx"
-        exit 1
-      fi
+create_self_signed_cert() {
+  echo "Creating self-signed certificate..."
+  openssl req -x509 -nodes -days $((365 * 15)) -newkey rsa:2048 \
+    -keyout "$ssl_key" \
+    -out "$ssl_cert" \
+    -subj "/CN=${domain}"
+}
 
-      certbot_args=(certonly --webroot -w "$APP_ROOT/current/public" -d "$domain" --non-interactive --agree-tos)
-      if [ -n "$email" ]; then
-        certbot_args+=(--email "$email")
-      else
-        certbot_args+=(--register-unsafely-without-email)
-      fi
+request_letsencrypt_cert() {
+  local force_renewal="$1"
+  if ! command -v certbot >/dev/null 2>&1; then
+    echo "Error: certbot is not installed. Run: server-tool install nginx"
+    exit 1
+  fi
 
-      echo "Requesting Let's Encrypt certificate..."
-      certbot "${certbot_args[@]}"
-      cp "/etc/letsencrypt/live/${domain}/fullchain.pem" "$ssl_cert"
-      cp "/etc/letsencrypt/live/${domain}/privkey.pem" "$ssl_key"
+  local certbot_args=(certonly --webroot -w "$APP_ROOT/current/public" -d "$domain" --non-interactive --agree-tos)
+  if [ -n "$email" ]; then
+    certbot_args+=(--email "$email")
+  else
+    certbot_args+=(--register-unsafely-without-email)
+  fi
+  if [ "$force_renewal" -eq 1 ]; then
+    certbot_args+=(--force-renewal)
+  fi
 
-      hook_dir="/etc/letsencrypt/renewal-hooks/deploy"
-      mkdir -p "$hook_dir"
-      cat > "${hook_dir}/${username}_${app_name}.sh" <<EOF
+  echo "Requesting Let's Encrypt certificate..."
+  certbot "${certbot_args[@]}"
+  cp "/etc/letsencrypt/live/${domain}/fullchain.pem" "$ssl_cert"
+  cp "/etc/letsencrypt/live/${domain}/privkey.pem" "$ssl_key"
+
+  local hook_dir="/etc/letsencrypt/renewal-hooks/deploy"
+  mkdir -p "$hook_dir"
+  cat > "${hook_dir}/${username}_${app_name}.sh" <<EOF
 #!/bin/bash
 cp "/etc/letsencrypt/live/${domain}/fullchain.pem" "$ssl_cert"
 cp "/etc/letsencrypt/live/${domain}/privkey.pem" "$ssl_key"
 nginx -s reload
 EOF
-      chmod 750 "${hook_dir}/${username}_${app_name}.sh"
+  chmod 750 "${hook_dir}/${username}_${app_name}.sh"
+}
+
+apply_cert_permissions() {
+  chmod 640 "$ssl_cert" "$ssl_key"
+  chown "$username:$username" "$ssl_dir" "$ssl_cert" "$ssl_key"
+}
+
+if [ "$renew" -eq 1 ]; then
+  if ! grep -q 'listen 443' "$APP_NGINX_CONF"; then
+    echo "Error: SSL is not enabled for $app_name. Run enable-ssl without --renew first."
+    exit 1
+  fi
+
+  if [ "$self_signed" -eq 1 ]; then
+    create_self_signed_cert
+  else
+    request_letsencrypt_cert 1
+  fi
+  apply_cert_permissions
+  reload_nginx
+
+  echo
+  echo "HTTPS certificate renewed."
+  echo "  Domain: $domain"
+  echo "  Cert:   $ssl_cert"
+  echo "  Key:    $ssl_key"
+  exit 0
+fi
+
+if grep -q 'listen 443' "$APP_NGINX_CONF"; then
+  echo "SSL is already enabled in $APP_NGINX_CONF, leaving the nginx config unchanged."
+else
+  if [ ! -f "$ssl_cert" ] || [ ! -f "$ssl_key" ]; then
+    if [ "$self_signed" -eq 1 ]; then
+      create_self_signed_cert
+    else
+      request_letsencrypt_cert 0
     fi
   else
     echo "Using existing certificate files in $ssl_dir"
   fi
 
-  chmod 640 "$ssl_cert" "$ssl_key"
-  chown "$username:$username" "$ssl_dir" "$ssl_cert" "$ssl_key"
+  apply_cert_permissions
 
   render_nginx_app_conf \
     "$SERVER_TOOL_ROOT/templates/nginx-laravel-ssl.conf" \
