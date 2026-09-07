@@ -76,6 +76,74 @@ EOF
   fi
 }
 
+require_application() {
+  local username="$1"
+  local app_name="$2"
+
+  case "$username" in
+    ""|*/*|root|admin|www-data|nginx|nobody|daemon)
+      echo "Error: refusing to change an application for user '$username'"
+      exit 1
+      ;;
+  esac
+
+  case "$app_name" in
+    ""|*/*|.|..|.ssh)
+      echo "Error: invalid application name '$app_name'"
+      exit 1
+      ;;
+  esac
+
+  if ! id "$username" &>/dev/null; then
+    echo "Error: user '$username' not found."
+    exit 1
+  fi
+
+  APP_ROOT="/home/${username}/${app_name}"
+  APP_NGINX_CONF="${APP_ROOT}/nginx/${app_name}.conf"
+
+  if [ ! -d "$APP_ROOT" ] || [ ! -f "$APP_NGINX_CONF" ]; then
+    echo "Error: application '$app_name' for user '$username' not found."
+    exit 1
+  fi
+}
+
+app_php_version_from_nginx() {
+  local conf="$1"
+  sed -n 's|.*unix:/run/php/php\([0-9][0-9.]*\)-fpm-.*|\1|p' "$conf" | head -1
+}
+
+app_server_name_from_nginx() {
+  local conf="$1"
+  sed -n 's/^[[:space:]]*server_name[[:space:]]*\([^;[:space:]]*\).*/\1/p' "$conf" | head -1
+}
+
+render_nginx_app_conf() {
+  local template="$1"
+  local dest="$2"
+  local username="$3"
+  local app_name="$4"
+  local app_root="$5"
+  local php_version="$6"
+  local server_name="$7"
+  local ssl_cert="${8:-}"
+  local ssl_key="${9:-}"
+
+  sed -e "s|{{USERNAME}}|$username|g" \
+      -e "s|{{APP_NAME}}|$app_name|g" \
+      -e "s|{{APP_ROOT}}|$app_root|g" \
+      -e "s|{{PHP_VERSION}}|$php_version|g" \
+      -e "s|{{SERVER_NAME}}|$server_name|g" \
+      -e "s|{{SSL_CERT}}|$ssl_cert|g" \
+      -e "s|{{SSL_KEY}}|$ssl_key|g" \
+      "$template" > "$dest"
+}
+
+reload_nginx() {
+  nginx -t
+  nginx -s reload
+}
+
 read_versions_from_file() {
   local file="$1"
   local line

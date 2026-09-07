@@ -49,6 +49,8 @@ server-tool delete-user <username> [-y]
 server-tool create-app <username> <application> [-u] [-d <db_name>] [-p <php-version>] [-y]
 server-tool create-app testdev demo -u -d mijnapp -p 8.4 -y
 server-tool delete-app <username> <application> [-y]
+server-tool enable-ssl <username> <application> [-d <domain>] [-e <email>] [--self-signed] [-y]
+server-tool enable-basic-auth <username> <application> <auth_user> [-r <realm>] [-y]
 server-tool create-db <db_name> [-y]
 server-tool create-github-runner <url> <token> [-n <name>] [-l <labels>] [-u <username>] [-y]
 server-tool create-github-runner https://github.com/my-org AAAA -n web-1 -l deploy -y

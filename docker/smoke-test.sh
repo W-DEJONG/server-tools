@@ -88,6 +88,7 @@ grep -q "phpinfo();" /home/testdev/demo/install/public/index.php
 test -d /home/testdev/demo/releases
 getfacl /home/testdev/demo/install | grep -q "user:nginx:r-x"
 test -d /home/testdev/demo/nginx
+test -d /home/testdev/demo/nginx/ssl
 getfacl /home/testdev | grep -q "user:nginx:--x"
 getfacl /home/testdev/demo | grep -q "user:nginx:--x"
 getfacl /home/testdev/demo/releases | grep -q "user:nginx:r-x"
@@ -101,6 +102,19 @@ grep -q "listen.owner = nginx" /home/testdev/demo/php-fpm/demo.conf
 grep -q "listen.group = nginx" /home/testdev/demo/php-fpm/demo.conf
 test -f /etc/php/${php_version}/fpm/pool.d/testdev_demo.conf
 test -f /etc/nginx/conf.d/testdev_demo.conf
+test -f /home/testdev/demo/nginx/auth.inc
+
+echo "==> enable-basic-auth testdev demo tester"
+server-tool enable-basic-auth testdev demo tester -r Staging -y
+grep -q 'auth_basic "Staging"' /home/testdev/demo/nginx/auth.inc
+test -s /home/testdev/demo/nginx/.htpasswd
+
+echo "==> enable-ssl testdev demo --self-signed"
+server-tool enable-ssl testdev demo -d demo.example.test --self-signed -y
+grep -q "listen 443 ssl" /home/testdev/demo/nginx/demo.conf
+test -f /home/testdev/demo/nginx/ssl/demo.example.test.pem
+test -f /home/testdev/demo/nginx/ssl/demo.example.test.key
+grep -q "return 301 https" /home/testdev/demo/nginx/demo.conf
 
 echo "==> delete-app testdev demo"
 server-tool delete-app testdev demo -y

@@ -1,0 +1,93 @@
+#!/bin/bash
+set -eo pipefail
+
+realm=""
+positionals=()
+usage="Usage: server-tool enable-basic-auth <username> <application> <auth_user> [-r <realm>] [-y]"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -r|--realm)
+      if [ -z "${2:-}" ]; then
+        echo "Error: -r requires a realm name"
+        echo "$usage"
+        exit 1
+      fi
+      realm="$2"
+      shift 2
+      ;;
+    *)
+      positionals+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ ${#positionals[@]} -ne 3 ]; then
+  echo "$usage"
+  exit 1
+fi
+
+username="${positionals[0]}"
+app_name="${positionals[1]}"
+auth_user="${positionals[2]}"
+require_application "$username" "$app_name"
+
+if ! [[ "$auth_user" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "Error: auth user may only contain letters, numbers, dots, underscores and hyphens."
+  exit 1
+fi
+
+if [ -z "$realm" ]; then
+  realm="$app_name"
+fi
+
+echo "Username: $username"
+echo "Application: $app_name"
+echo "Auth user: $auth_user"
+echo "Realm: $realm"
+confirm_or_exit "This will enable HTTP basic auth for $app_name. Do you want to proceed? (y/n): "
+
+apt-get -y install apache2-utils
+htpasswd_file="$APP_ROOT/nginx/.htpasswd"
+auth_inc="$APP_ROOT/nginx/auth.inc"
+created_password=""
+
+if [ "${ASSUME_YES:-0}" = "1" ]; then
+  if command -v openssl >/dev/null 2>&1; then
+    created_password="$(openssl rand -hex 12)"
+  else
+    created_password="$(dd if=/dev/urandom bs=12 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')"
+  fi
+  if [ -f "$htpasswd_file" ]; then
+    htpasswd -b "$htpasswd_file" "$auth_user" "$created_password"
+  else
+    htpasswd -b -c "$htpasswd_file" "$auth_user" "$created_password"
+  fi
+else
+  if [ -f "$htpasswd_file" ]; then
+    htpasswd "$htpasswd_file" "$auth_user"
+  else
+    htpasswd -c "$htpasswd_file" "$auth_user"
+  fi
+fi
+
+chmod 640 "$htpasswd_file"
+chown "$username:nginx" "$htpasswd_file"
+
+cat > "$auth_inc" <<EOF
+    auth_basic "$realm";
+    auth_basic_user_file $htpasswd_file;
+EOF
+chown "$username:$username" "$auth_inc"
+
+reload_nginx
+
+echo
+echo "Basic auth is ready."
+echo "  Realm: $realm"
+echo "  User:  $auth_user"
+echo "  File:  $htpasswd_file"
+if [ -n "$created_password" ]; then
+  echo "  Password: $created_password"
+  echo "Store this password now; it is not saved by server-tool."
+fi

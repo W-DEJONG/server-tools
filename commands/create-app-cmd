@@ -109,6 +109,7 @@ fi
 # Setup nginx config for the application
 mkdir "$app_root"
 mkdir "$app_root/nginx"
+mkdir "$app_root/nginx/ssl"
 mkdir "$app_root/php-fpm"
 mkdir "$app_root/releases"
 mkdir "$app_root/install"
@@ -149,12 +150,15 @@ EOF
 mkdir -p "/etc/php/$php_version/fpm/pool.d"
 echo "include=$app_root/php-fpm/${app_name}.conf" > "/etc/php/$php_version/fpm/pool.d/${username}_${app_name}.conf"
 
-sed -e "s|{{USERNAME}}|$username|g" \
-    -e "s|{{APP_NAME}}|$app_name|g" \
-    -e "s|{{APP_ROOT}}|$app_root|g" \
-    -e "s|{{PHP_VERSION}}|$php_version|g" \
+: > "$app_root/nginx/auth.inc"
+render_nginx_app_conf \
     "$SERVER_TOOL_ROOT/templates/nginx-laravel.conf" \
-    > "$app_root/nginx/${app_name}.conf"
+    "$app_root/nginx/${app_name}.conf" \
+    "$username" \
+    "$app_name" \
+    "$app_root" \
+    "$php_version" \
+    "$app_name"
 
 chown -R "$username:$username" "$app_root"
 apply_app_nginx_acl "$username" "$app_root"
