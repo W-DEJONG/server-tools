@@ -1,13 +1,32 @@
 #!/bin/bash
 set -eo pipefail
 
-if [ $# -lt 1 ]; then
-    echo "Usage: server-tool create-sudo-user <username> [-y]"
+no_password=0
+positionals=()
+usage="Usage: server-tool create-sudo-user <username> [--no-password] [-y]"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --no-password)
+      no_password=1
+      shift
+      ;;
+    *)
+      positionals+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ ${#positionals[@]} -ne 1 ]; then
+    echo "$usage"
     exit 1
 fi
 
-username=$1
+username="${positionals[0]}"
 echo "Username: $username"
+if [ "$no_password" -eq 1 ]; then
+    echo "Password: none (must be set at first login)"
+fi
 
 case "$username" in
   ""|*/*|root|www-data|nginx|nobody|daemon|postgres|mysql|redis|meilisearch)
@@ -37,12 +56,16 @@ else
     useradd -g "$username" -m -s /bin/bash "$username"
     created_user=1
 
-    if command -v openssl >/dev/null 2>&1; then
-        created_password="$(openssl rand -hex 16)"
+    if [ "$no_password" -eq 1 ]; then
+        passwd -d "$username"
     else
-        created_password="$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')"
+        if command -v openssl >/dev/null 2>&1; then
+            created_password="$(openssl rand -hex 16)"
+        else
+            created_password="$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')"
+        fi
+        echo "$username:$created_password" | chpasswd
     fi
-    echo "$username:$created_password" | chpasswd
     chage -d 0 "$username"
 
     mkdir -m700 "/home/$username/.ssh"
@@ -66,7 +89,13 @@ echo "Sudo user is ready."
 echo "  User: $username"
 echo "  Home: /home/$username"
 if [ "$created_user" -eq 1 ]; then
-    echo "  Temporary password: $created_password"
-    echo "This password must be changed at first login."
-    echo "Store it now; it is not saved by server-tool."
+    if [ "$no_password" -eq 1 ]; then
+        echo "  Password: not set"
+        echo "The user must set a password at first login."
+        echo "Add an SSH public key to /home/$username/.ssh/authorized_keys before they log in."
+    else
+        echo "  Temporary password: $created_password"
+        echo "This password must be changed at first login."
+        echo "Store it now; it is not saved by server-tool."
+    fi
 fi

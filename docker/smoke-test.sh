@@ -72,6 +72,13 @@ test ! -s /home/smokeadmin/.ssh/authorized_keys
 [ "$(getent shadow smokeadmin | cut -d: -f3)" = "0" ]
 grep -qxF "export LS_OPTIONS='--color=auto'" /home/smokeadmin/.bashrc
 
+echo "==> create-sudo-user smokenopass --no-password"
+server-tool create-sudo-user smokenopass --no-password -y
+id smokenopass
+id -nG smokenopass | grep -qw sudo
+[ -z "$(getent shadow smokenopass | cut -d: -f2)" ]
+[ "$(getent shadow smokenopass | cut -d: -f3)" = "0" ]
+
 echo "==> create-user testdev ${php_version}"
 server-tool create-user testdev -y -p "$php_version"
 id -nG testdev | grep -qw nginx
