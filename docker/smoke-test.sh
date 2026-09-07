@@ -63,19 +63,22 @@ echo "==> install mariadb-server"
 server-tool install mariadb-server -y
 
 echo "==> create-sudo-user smokeadmin"
-server-tool create-sudo-user smokeadmin -y
+ssh-keygen -t ed25519 -N "" -f /tmp/smokeadmin -C smokeadmin@test -q
+server-tool create-sudo-user smokeadmin -y -k /tmp/smokeadmin.pub
 id smokeadmin
 id -nG smokeadmin | grep -qw sudo
 test -d /home/smokeadmin/.ssh
-test -f /home/smokeadmin/.ssh/authorized_keys
-test ! -s /home/smokeadmin/.ssh/authorized_keys
+test -s /home/smokeadmin/.ssh/authorized_keys
+grep -qxF "$(cat /tmp/smokeadmin.pub)" /home/smokeadmin/.ssh/authorized_keys
 [ "$(getent shadow smokeadmin | cut -d: -f3)" = "0" ]
 grep -qxF "export LS_OPTIONS='--color=auto'" /home/smokeadmin/.bashrc
 
 echo "==> create-sudo-user smokenopass --no-password"
-server-tool create-sudo-user smokenopass --no-password -y
+ssh-keygen -t ed25519 -N "" -f /tmp/smokenopass -C smokenopass@test -q
+server-tool create-sudo-user smokenopass --no-password -y -k /tmp/smokenopass.pub
 id smokenopass
 id -nG smokenopass | grep -qw sudo
+grep -qxF "$(cat /tmp/smokenopass.pub)" /home/smokenopass/.ssh/authorized_keys
 [ -z "$(getent shadow smokenopass | cut -d: -f2)" ]
 [ "$(getent shadow smokenopass | cut -d: -f3)" = "0" ]
 

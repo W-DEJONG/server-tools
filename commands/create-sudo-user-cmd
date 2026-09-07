@@ -2,13 +2,23 @@
 set -eo pipefail
 
 no_password=0
+ssh_public_key=""
 positionals=()
-usage="Usage: server-tool create-sudo-user <username> [--no-password] [-y]"
+usage="Usage: server-tool create-sudo-user <username> [-k <ssh-public-key-or-file>] [--no-password] [-y]"
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-password)
       no_password=1
       shift
+      ;;
+    -k|--ssh-key)
+      if [ -z "${2:-}" ]; then
+        echo "Error: -k requires an SSH public key or path to a .pub file"
+        echo "$usage"
+        exit 1
+      fi
+      ssh_public_key="$2"
+      shift 2
       ;;
     *)
       positionals+=("$1")
@@ -40,6 +50,36 @@ if ! [[ "$username" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
     exit 1
 fi
 
+resolve_ssh_public_key() {
+    local input="$1"
+    if [ -f "$input" ] && [ -r "$input" ]; then
+        input="$(head -1 "$input")"
+    fi
+    input="$(printf '%s' "$input" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    if [ -z "$input" ]; then
+        echo "Error: SSH public key is empty."
+        exit 1
+    fi
+    if ! printf '%s\n' "$input" | grep -qE '^(ssh-(rsa|ed25519|dss|ecdsa)|ecdsa-sha2-|sk-ssh-)'; then
+        echo "Error: invalid SSH public key."
+        exit 1
+    fi
+    ssh_public_key="$input"
+}
+
+if ! id "$username" &>/dev/null; then
+    if [ -z "$ssh_public_key" ]; then
+        if [ "${ASSUME_YES:-0}" = "1" ]; then
+            echo "Error: -k/--ssh-key is required when creating a sudo user."
+            echo "$usage"
+            exit 1
+        fi
+        read -r -p "SSH public key (or path to a .pub file): " ssh_public_key
+    fi
+    resolve_ssh_public_key "$ssh_public_key"
+    echo "SSH key: $ssh_public_key"
+fi
+
 confirm_or_exit "This will create user $username with sudo rights. Do you want to proceed? (y/n): "
 
 apt-get -y install sudo
@@ -69,7 +109,7 @@ else
     chage -d 0 "$username"
 
     mkdir -m700 "/home/$username/.ssh"
-    : > "/home/$username/.ssh/authorized_keys"
+    printf '%s\n' "$ssh_public_key" > "/home/$username/.ssh/authorized_keys"
     chmod 600 "/home/$username/.ssh/authorized_keys"
     chown -R "$username:$username" "/home/$username/.ssh"
 fi
@@ -89,10 +129,10 @@ echo "Sudo user is ready."
 echo "  User: $username"
 echo "  Home: /home/$username"
 if [ "$created_user" -eq 1 ]; then
+    echo "  SSH key: /home/$username/.ssh/authorized_keys"
     if [ "$no_password" -eq 1 ]; then
         echo "  Password: not set"
         echo "The user must set a password at first login."
-        echo "Add an SSH public key to /home/$username/.ssh/authorized_keys before they log in."
     else
         echo "  Temporary password: $created_password"
         echo "This password must be changed at first login."
