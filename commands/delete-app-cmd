@@ -11,6 +11,7 @@ app_name=$2
 home_dir="/home/$username"
 app_root="$home_dir/$app_name"
 nginx_conf="/etc/nginx/conf.d/${username}_${app_name}.conf"
+supervisor_link="/etc/supervisor/conf.d/${username}_${app_name}.d"
 
 echo "Username: $username"
 echo "Application: $app_name"
@@ -50,13 +51,16 @@ if command -v nginx >/dev/null 2>&1; then
     fi
 fi
 
+rm -f "$supervisor_link"
+reload_supervisor
+
 if [ -e "$app_root" ]; then
     echo "Removing $app_root"
     rm -rf "$app_root"
 fi
 
-if [ -e "$app_root" ] || [ -e "$nginx_conf" ]; then
-    echo "Cleanup incomplete: application folder or nginx config still present."
+if [ -e "$app_root" ] || [ -e "$nginx_conf" ] || [ -e "$supervisor_link" ]; then
+    echo "Cleanup incomplete: application folder, nginx config or supervisor include still present."
     exit 1
 fi
 

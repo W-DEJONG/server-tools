@@ -39,6 +39,8 @@ if [ -d /etc/php ]; then
     done
 fi
 rm -f /run/php/php*-fpm-"${username}".sock /run/php/php*-fpm-"${username}"-*.sock
+rm -f /etc/supervisor/conf.d/${username}_*.d
+reload_supervisor
 
 if id "$username" &>/dev/null; then
     pkill -u "$username" >/dev/null 2>&1 || true

@@ -102,7 +102,16 @@ grep -q "listen.owner = nginx" /home/testdev/demo/php-fpm/demo.conf
 grep -q "listen.group = nginx" /home/testdev/demo/php-fpm/demo.conf
 test -f /etc/php/${php_version}/fpm/pool.d/testdev_demo.conf
 test -f /etc/nginx/conf.d/testdev_demo.conf
+test -d /home/testdev/demo/supervisor
+test -L /etc/supervisor/conf.d/testdev_demo.d
 test -f /home/testdev/demo/nginx/auth.inc
+
+echo "==> create-horizon testdev demo"
+server-tool create-horizon testdev demo -y
+test -f /home/testdev/demo/supervisor/horizon.conf
+grep -q "php${php_version} artisan horizon" /home/testdev/demo/supervisor/horizon.conf
+grep -q "directory=/home/testdev/demo/current/" /home/testdev/demo/supervisor/horizon.conf
+test -L /etc/supervisor/conf.d/testdev_demo.d
 
 echo "==> enable-basic-auth testdev demo tester"
 server-tool enable-basic-auth testdev demo tester -r Staging -y
@@ -125,6 +134,7 @@ server-tool delete-app testdev demo -y
 test ! -e /home/testdev/demo
 test ! -e /etc/nginx/conf.d/testdev_demo.conf
 test ! -e "/etc/php/${php_version}/fpm/pool.d/testdev_demo.conf"
+test ! -e /etc/supervisor/conf.d/testdev_demo.d
 
 echo "==> verify packages"
 "php${php_version}" -v

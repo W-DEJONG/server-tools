@@ -353,6 +353,47 @@ php_fpm_is_installed() {
   command -v "php-fpm${version}" >/dev/null 2>&1 && [ -d "/etc/php/${version}/fpm/pool.d" ]
 }
 
+ensure_app_supervisor() {
+  local username="$1"
+  local app_name="$2"
+  local app_root="${3:-/home/${username}/${app_name}}"
+
+  ensure_supervisor_app_includes
+  mkdir -p "$app_root/supervisor"
+  chown "$username:$username" "$app_root/supervisor"
+  mkdir -p /etc/supervisor/conf.d
+  ln -sfn "$app_root/supervisor" "/etc/supervisor/conf.d/${username}_${app_name}.d"
+}
+
+ensure_supervisor_app_includes() {
+  if [ ! -f /etc/supervisor/supervisord.conf ]; then
+    apt-get -y install supervisor
+  fi
+
+  local conf="/etc/supervisor/supervisord.conf"
+  local wanted='files = /etc/supervisor/conf.d/*.conf /etc/supervisor/conf.d/*.d/*.conf'
+
+  if grep -qF "$wanted" "$conf"; then
+    return 0
+  fi
+
+  if grep -qE '^[[:space:]]*files[[:space:]]*=' "$conf"; then
+    sed -i 's|^[[:space:]]*files[[:space:]]*=.*|'"$wanted"'|' "$conf"
+  else
+    printf '\n[include]\n%s\n' "$wanted" >> "$conf"
+  fi
+}
+
+reload_supervisor() {
+  if ! command -v supervisorctl >/dev/null 2>&1; then
+    return 0
+  fi
+  if systemctl is-active --quiet supervisor || systemctl is-active --quiet supervisord; then
+    supervisorctl reread
+    supervisorctl update
+  fi
+}
+
 ensure_php_fpm() {
   local version="$1"
   if php_fpm_is_installed "$version"; then

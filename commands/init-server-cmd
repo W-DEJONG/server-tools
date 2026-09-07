@@ -20,5 +20,6 @@ chmod 755 /home
 # install common tools & SURY repo for current PHP releases
 apt-get update
 apt-get -y install htop dnsutils lsb-release ca-certificates curl gnupg supervisor cron rsync python3-pip magic-wormhole certbot zip unzip telnet acl openssh-client
+ensure_supervisor_app_includes
 ensure_sury_php_repo
 DEBIAN_FRONTEND=noninteractive apt-get -y -o Dpkg::Options::=--force-confold upgrade

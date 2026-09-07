@@ -1,0 +1,109 @@
+#!/bin/bash
+set -eo pipefail
+
+php_version=""
+numprocs="1"
+positionals=()
+usage="Usage: server-tool create-horizon <username> <application> [-p <php-version>] [-n <numprocs>] [-y]"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -p|--php)
+      if [ -z "${2:-}" ]; then
+        echo "Error: -p requires a PHP version"
+        echo "$usage"
+        exit 1
+      fi
+      php_version="$2"
+      shift 2
+      ;;
+    -n|--numprocs)
+      if [ -z "${2:-}" ]; then
+        echo "Error: -n requires a process count"
+        echo "$usage"
+        exit 1
+      fi
+      numprocs="$2"
+      shift 2
+      ;;
+    *)
+      positionals+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ ${#positionals[@]} -ne 2 ]; then
+  echo "$usage"
+  exit 1
+fi
+
+if ! [[ "$numprocs" =~ ^[1-9][0-9]*$ ]]; then
+  echo "Error: numprocs must be a positive integer."
+  exit 1
+fi
+
+username="${positionals[0]}"
+app_name="${positionals[1]}"
+require_application "$username" "$app_name"
+
+if [ -n "$php_version" ]; then
+  resolve_versions "$SERVER_TOOL_ROOT/templates/php-versions" \
+    'Which PHP version should Horizon use? ' \
+    0 \
+    "$php_version"
+  php_version="$SELECTED_VERSION"
+else
+  php_version="$(app_php_version_from_nginx "$APP_NGINX_CONF")"
+fi
+
+if [ -z "$php_version" ]; then
+  echo "Error: could not determine PHP version. Pass -p <php-version>."
+  exit 1
+fi
+
+echo "Username: $username"
+echo "Application: $app_name"
+echo "PHP version: $php_version"
+echo "Processes: $numprocs"
+confirm_or_exit "This will create a Supervisor config for Laravel Horizon. Do you want to proceed? (y/n): "
+
+ensure_app_supervisor "$username" "$app_name" "$APP_ROOT"
+
+horizon_conf="$APP_ROOT/supervisor/horizon.conf"
+program_name="horizon-${username}-${app_name}"
+
+if [ -f "$horizon_conf" ]; then
+  echo "Horizon supervisor config already exists, leaving it unchanged."
+else
+  cat > "$horizon_conf" <<EOF
+[program:${program_name}]
+directory=${APP_ROOT}/current/
+command=php${php_version} artisan horizon
+process_name=%(program_name)s_%(process_num)02d
+autostart=true
+autorestart=true
+user=${username}
+numprocs=${numprocs}
+startsecs=1
+redirect_stderr=true
+stdout_logfile=${APP_ROOT}/log/horizon.log
+stdout_logfile_maxbytes=5MB
+stdout_logfile_backups=3
+stopwaitsecs=5
+stopsignal=SIGTERM
+stopasgroup=true
+killasgroup=true
+EOF
+  chown "$username:$username" "$horizon_conf"
+fi
+
+reload_supervisor
+
+echo
+echo "Laravel Horizon supervisor config is ready."
+echo "  Config:  $horizon_conf"
+echo "  Program: $program_name"
+echo "  Command: php${php_version} artisan horizon"
+echo "  Log:     $APP_ROOT/log/horizon.log"
+echo
+echo "Reload with: supervisorctl reread && supervisorctl update"

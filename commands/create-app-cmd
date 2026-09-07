@@ -115,6 +115,7 @@ mkdir "$app_root/releases"
 mkdir "$app_root/install"
 mkdir "$app_root/install/public"
 mkdir "$app_root/cron"
+mkdir "$app_root/supervisor"
 mkdir "$app_root/log"
 ln -s install "$app_root/current"
 cat > "$app_root/install/public/index.php" <<'EOF'
@@ -164,6 +165,9 @@ chown -R "$username:$username" "$app_root"
 apply_app_nginx_acl "$username" "$app_root"
 
 echo "include $app_root/nginx/*.conf;" > "/etc/nginx/conf.d/${username}_${app_name}.conf"
+
+ensure_app_supervisor "$username" "$app_name" "$app_root"
+reload_supervisor
 
 php-fpm${php_version} -tt
 systemctl restart php${php_version}-fpm
