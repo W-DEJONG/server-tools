@@ -53,6 +53,7 @@ fi
 
 rm -f "$supervisor_link"
 reload_supervisor
+remove_app_crontab "$username" "$app_name"
 
 if [ -e "$app_root" ]; then
     echo "Removing $app_root"

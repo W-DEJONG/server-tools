@@ -53,6 +53,9 @@ server-tool enable-ssl <username> <application> [-d <domain>] [-e <email>] [--se
 server-tool enable-basic-auth <username> <application> <auth_user> [-r <realm>] [-y]
 server-tool disable-ssh-password [-y]
 server-tool create-horizon <username> <application> [-p <php-version>] [-n <numprocs>] [-y]
+server-tool apply-cron <username> <application> [-y]
+server-tool enable-scheduler <username> <application> [-p <php-version>] [-y]
+server-tool disable-scheduler <username> <application> [-y]
 server-tool create-db <db_name> [-y]
 server-tool create-github-runner <url> <token> [-n <name>] [-l <labels>] [-u <username>] [-y]
 server-tool create-github-runner https://github.com/my-org AAAA -n web-1 -l deploy -y

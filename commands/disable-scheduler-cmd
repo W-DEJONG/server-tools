@@ -1,0 +1,29 @@
+#!/bin/bash
+set -eo pipefail
+
+if [ $# -ne 2 ]; then
+  echo "Usage: server-tool disable-scheduler <username> <application> [-y]"
+  exit 1
+fi
+
+username="$1"
+app_name="$2"
+require_application "$username" "$app_name"
+
+echo "Username: $username"
+echo "Application: $app_name"
+confirm_or_exit "This will disable the Laravel scheduler cron job for $app_name. Do you want to proceed? (y/n): "
+
+scheduler_file="$APP_ROOT/cron/scheduler"
+if [ -f "$scheduler_file" ]; then
+  rm -f "$scheduler_file"
+else
+  echo "Scheduler cron file is not present, nothing to remove."
+fi
+
+apply_app_crontab "$username" "$app_name" "$APP_ROOT"
+
+echo
+echo "Laravel scheduler is disabled."
+echo "  Removed: $scheduler_file"
+echo "  User:    $username"

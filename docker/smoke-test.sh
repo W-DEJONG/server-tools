@@ -146,12 +146,36 @@ echo "==> enable-ssl testdev demo --self-signed --renew"
 server-tool enable-ssl testdev demo -d demo.example.test --self-signed --renew -y
 openssl x509 -in /home/testdev/demo/nginx/ssl/demo.example.test.pem -noout -checkend $((86400 * 365 * 14))
 
+echo "==> enable-scheduler testdev demo"
+test -d /home/testdev/demo/cron
+server-tool enable-scheduler testdev demo -y
+grep -q "php${php_version} artisan schedule:run" /home/testdev/demo/cron/scheduler
+crontab -u testdev -l | grep -qF '# BEGIN server-tool app: testdev/demo'
+crontab -u testdev -l | grep -qF "cd /home/testdev/demo/current && php${php_version} artisan schedule:run"
+crontab -u testdev -l | grep -qF '# END server-tool app: testdev/demo'
+
+echo "==> apply-cron testdev demo"
+cat > /home/testdev/demo/cron/extra <<EOF
+0 3 * * * php /home/testdev/demo/current/artisan extra:job
+EOF
+chown testdev:testdev /home/testdev/demo/cron/extra
+server-tool apply-cron testdev demo -y
+crontab -u testdev -l | grep -qF "php${php_version} artisan schedule:run"
+crontab -u testdev -l | grep -qF 'artisan extra:job'
+
+echo "==> disable-scheduler testdev demo"
+server-tool disable-scheduler testdev demo -y
+test ! -f /home/testdev/demo/cron/scheduler
+! crontab -u testdev -l | grep -qF 'artisan schedule:run'
+crontab -u testdev -l | grep -qF 'artisan extra:job'
+
 echo "==> delete-app testdev demo"
 server-tool delete-app testdev demo -y
 test ! -e /home/testdev/demo
 test ! -e /etc/nginx/conf.d/testdev_demo.conf
 test ! -e "/etc/php/${php_version}/fpm/pool.d/testdev_demo.conf"
 test ! -e /etc/supervisor/conf.d/testdev_demo.d
+! grep -qF '# BEGIN server-tool app: testdev/demo' <<< "$(crontab -u testdev -l 2>/dev/null || true)"
 
 echo "==> verify packages"
 "php${php_version}" -v

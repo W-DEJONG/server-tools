@@ -1,0 +1,73 @@
+#!/bin/bash
+set -eo pipefail
+
+php_version=""
+positionals=()
+usage="Usage: server-tool enable-scheduler <username> <application> [-p <php-version>] [-y]"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -p|--php)
+      if [ -z "${2:-}" ]; then
+        echo "Error: -p requires a PHP version"
+        echo "$usage"
+        exit 1
+      fi
+      php_version="$2"
+      shift 2
+      ;;
+    *)
+      positionals+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ ${#positionals[@]} -ne 2 ]; then
+  echo "$usage"
+  exit 1
+fi
+
+username="${positionals[0]}"
+app_name="${positionals[1]}"
+require_application "$username" "$app_name"
+
+if [ -n "$php_version" ]; then
+  resolve_versions "$SERVER_TOOL_ROOT/templates/php-versions" \
+    'Which PHP version should the scheduler use? ' \
+    0 \
+    "$php_version"
+  php_version="$SELECTED_VERSION"
+else
+  php_version="$(app_php_version_from_nginx "$APP_NGINX_CONF")"
+fi
+
+if [ -z "$php_version" ]; then
+  echo "Error: could not determine PHP version. Pass -p <php-version>."
+  exit 1
+fi
+
+echo "Username: $username"
+echo "Application: $app_name"
+echo "PHP version: $php_version"
+confirm_or_exit "This will enable the Laravel scheduler cron job for $app_name. Do you want to proceed? (y/n): "
+
+mkdir -p "$APP_ROOT/cron"
+chown "$username:$username" "$APP_ROOT/cron"
+
+scheduler_file="$APP_ROOT/cron/scheduler"
+if [ -f "$scheduler_file" ]; then
+  echo "Scheduler cron file already exists, leaving it unchanged."
+else
+  cat > "$scheduler_file" <<EOF
+* * * * * cd ${APP_ROOT}/current && php${php_version} artisan schedule:run >> /dev/null 2>&1
+EOF
+  chown "$username:$username" "$scheduler_file"
+fi
+
+apply_app_crontab "$username" "$app_name" "$APP_ROOT"
+
+echo
+echo "Laravel scheduler is enabled."
+echo "  Cron file: $scheduler_file"
+echo "  Command:   cd ${APP_ROOT}/current && php${php_version} artisan schedule:run"
+echo "  User:      $username"

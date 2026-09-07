@@ -1,0 +1,23 @@
+#!/bin/bash
+set -eo pipefail
+
+if [ $# -ne 2 ]; then
+  echo "Usage: server-tool apply-cron <username> <application> [-y]"
+  exit 1
+fi
+
+username="$1"
+app_name="$2"
+require_application "$username" "$app_name"
+
+echo "Username: $username"
+echo "Application: $app_name"
+echo "Cron dir: $APP_ROOT/cron"
+confirm_or_exit "This will update the crontab for $username from $APP_ROOT/cron. Do you want to proceed? (y/n): "
+
+apply_app_crontab "$username" "$app_name" "$APP_ROOT"
+
+echo
+echo "Crontab updated for $username."
+echo "  Source: $APP_ROOT/cron"
+echo "  User:   $username"
