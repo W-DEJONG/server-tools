@@ -1,18 +1,27 @@
 #!/bin/bash
 set -eo pipefail
 
-if [ $# -ne 2 ]; then
-  echo "Usage: server-tool dump-db <username> <application> [-y]"
+usage="Usage: server-tool dump-db <username> <application> [<target-folder>] [-y]"
+if [ $# -lt 2 ] || [ $# -gt 3 ]; then
+  echo "$usage"
   exit 1
 fi
 
 username="$1"
 app_name="$2"
+target_folder="${3:-$PWD}"
+
 require_application "$username" "$app_name"
 load_app_db_env "$APP_ROOT/.env.db"
 require_postgres_client pg_dump
 
-dump_file="$APP_ROOT/${app_name}-$(date +%Y%m%d-%H%M%S).dump"
+if [ ! -d "$target_folder" ]; then
+  echo "Error: target folder does not exist: $target_folder"
+  exit 1
+fi
+
+target_folder="$(readlink -f "$target_folder")"
+dump_file="$target_folder/${app_name}-$(date +%Y%m%d-%H%M%S).dump"
 
 echo "Username: $username"
 echo "Application: $app_name"
@@ -31,7 +40,6 @@ PGPASSWORD="$DB_PASSWORD" pg_dump \
   --no-owner \
   --file="$dump_file"
 
-chown "$username:$username" "$dump_file"
 chmod 640 "$dump_file"
 
 echo

@@ -57,7 +57,7 @@ server-tool apply-cron <username> <application> [-y]
 server-tool enable-scheduler <username> <application> [-p <php-version>] [-y]
 server-tool disable-scheduler <username> <application> [-y]
 server-tool create-db <db_name> [-y]
-server-tool dump-db <username> <application> [-y]
+server-tool dump-db <username> <application> [<target-folder>] [-y]
 server-tool restore-db <username> <application> <file> [-y]
 server-tool create-github-runner <url> <token> [-n <name>] [-l <labels>] [-u <username>] [-y]
 server-tool create-github-runner https://github.com/my-org AAAA -n web-1 -l deploy -y

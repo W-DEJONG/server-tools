@@ -133,8 +133,8 @@ grep -q '^DB_DATABASE=dump_testdb' /home/testdev/demo/.env.db
 echo "==> dump-db and restore-db testdev demo"
 db_pass="$(sed -n 's/^DB_PASSWORD=//p' /home/testdev/demo/.env.db | head -1)"
 PGPASSWORD="$db_pass" psql -h 127.0.0.1 -U dump_testdb -d dump_testdb -v ON_ERROR_STOP=1 -c "CREATE TABLE smoke (id int); INSERT INTO smoke VALUES (1);"
-server-tool dump-db testdev demo -y
-dump_file="$(ls -1t /home/testdev/demo/demo-*.dump | head -1)"
+server-tool dump-db testdev demo /tmp -y
+dump_file="$(ls -1t /tmp/demo-*.dump | head -1)"
 test -s "$dump_file"
 PGPASSWORD="$db_pass" psql -h 127.0.0.1 -U dump_testdb -d dump_testdb -v ON_ERROR_STOP=1 -c "DROP TABLE smoke;"
 server-tool restore-db testdev demo "$dump_file" -y
