@@ -98,8 +98,8 @@ grep -q '^KbdInteractiveAuthentication no' /etc/ssh/sshd_config.d/10-server-tool
 grep -q '^PubkeyAuthentication yes' /etc/ssh/sshd_config.d/10-server-tool.conf
 sshd -t
 
-echo "==> create-app testdev demo"
-server-tool create-app testdev demo -y
+echo "==> create-app testdev demo -d dump_testdb"
+server-tool create-app testdev demo -d dump_testdb -y
 
 echo "==> verify application layout"
 test -d /home/testdev/demo/install/public
@@ -127,6 +127,18 @@ test -f /etc/nginx/conf.d/testdev_demo.conf
 test -d /home/testdev/demo/supervisor
 test -L /etc/supervisor/conf.d/testdev_demo.d
 test -f /home/testdev/demo/nginx/auth.inc
+test -f /home/testdev/demo/.env.db
+grep -q '^DB_DATABASE=dump_testdb' /home/testdev/demo/.env.db
+
+echo "==> dump-db and restore-db testdev demo"
+db_pass="$(sed -n 's/^DB_PASSWORD=//p' /home/testdev/demo/.env.db | head -1)"
+PGPASSWORD="$db_pass" psql -h 127.0.0.1 -U dump_testdb -d dump_testdb -v ON_ERROR_STOP=1 -c "CREATE TABLE smoke (id int); INSERT INTO smoke VALUES (1);"
+server-tool dump-db testdev demo -y
+dump_file="$(ls -1t /home/testdev/demo/demo-*.dump | head -1)"
+test -s "$dump_file"
+PGPASSWORD="$db_pass" psql -h 127.0.0.1 -U dump_testdb -d dump_testdb -v ON_ERROR_STOP=1 -c "DROP TABLE smoke;"
+server-tool restore-db testdev demo "$dump_file" -y
+PGPASSWORD="$db_pass" psql -h 127.0.0.1 -U dump_testdb -d dump_testdb -tAc "SELECT id FROM smoke" | grep -qx 1
 
 echo "==> create-horizon testdev demo"
 server-tool create-horizon testdev demo -y

@@ -1,0 +1,38 @@
+#!/bin/bash
+set -eo pipefail
+
+if [ $# -ne 2 ]; then
+  echo "Usage: server-tool dump-db <username> <application> [-y]"
+  exit 1
+fi
+
+username="$1"
+app_name="$2"
+require_application "$username" "$app_name"
+load_app_db_env "$APP_ROOT/.env.db"
+require_postgres_client pg_dump
+
+dump_file="$APP_ROOT/${app_name}-$(date +%Y%m%d-%H%M%S).dump"
+
+echo "Username: $username"
+echo "Application: $app_name"
+echo "Database: $DB_DATABASE"
+echo "Output: $dump_file"
+confirm_or_exit "This will dump the database of $username/$app_name. Do you want to proceed? (y/n): "
+
+PGPASSWORD="$DB_PASSWORD" pg_dump \
+  --host="$DB_HOST" \
+  --port="$DB_PORT" \
+  --username="$DB_USERNAME" \
+  --dbname="$DB_DATABASE" \
+  --clean \
+  --no-acl \
+  --format=custom \
+  --no-owner \
+  --file="$dump_file"
+
+chown "$username:$username" "$dump_file"
+chmod 640 "$dump_file"
+
+echo
+echo "Database dump written to $dump_file"

@@ -286,6 +286,86 @@ create_postgres_database() {
   CREATED_DB_IS_NEW=1
 }
 
+require_postgres_client() {
+  local tool="$1"
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "Error: $tool is not installed. Run: server-tool install postgresql"
+    exit 1
+  fi
+}
+
+load_app_db_env() {
+  local env_file="$1"
+  local line key value
+  DB_CONNECTION=""
+  DB_HOST=""
+  DB_PORT=""
+  DB_DATABASE=""
+  DB_USERNAME=""
+  DB_PASSWORD=""
+
+  if [ ! -f "$env_file" ]; then
+    echo "Error: database credentials file not found: $env_file"
+    exit 1
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    case "$line" in
+      ''|\#*)
+        continue
+        ;;
+    esac
+    if [ "${line#export }" != "$line" ]; then
+      line="${line#export }"
+      line="${line#"${line%%[![:space:]]*}"}"
+    fi
+    case "$line" in
+      *=*)
+        ;;
+      *)
+        continue
+        ;;
+    esac
+    key="${line%%=*}"
+    value="${line#*=}"
+    key="${key%"${key##*[![:space:]]}"}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    case "$value" in
+      \"*\")
+        value="${value#\"}"
+        value="${value%\"}"
+        ;;
+      \'*\')
+        value="${value#\'}"
+        value="${value%\'}"
+        ;;
+    esac
+    case "$key" in
+      DB_CONNECTION) DB_CONNECTION="$value" ;;
+      DB_HOST) DB_HOST="$value" ;;
+      DB_PORT) DB_PORT="$value" ;;
+      DB_DATABASE) DB_DATABASE="$value" ;;
+      DB_USERNAME) DB_USERNAME="$value" ;;
+      DB_PASSWORD) DB_PASSWORD="$value" ;;
+    esac
+  done < "$env_file"
+
+  if [ -n "$DB_CONNECTION" ] && [ "$DB_CONNECTION" != "pgsql" ]; then
+    echo "Error: only PostgreSQL databases are supported (DB_CONNECTION=$DB_CONNECTION)."
+    exit 1
+  fi
+
+  if [ -z "$DB_HOST" ] || [ -z "$DB_DATABASE" ] || [ -z "$DB_USERNAME" ]; then
+    echo "Error: $env_file is missing required DB_HOST, DB_DATABASE or DB_USERNAME."
+    exit 1
+  fi
+
+  DB_PORT="${DB_PORT:-5432}"
+}
+
 apply_app_nginx_acl() {
   local username="$1"
   local app_root="$2"
