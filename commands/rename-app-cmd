@@ -127,6 +127,7 @@ rewrite_app_refs() {
   sed -i \
     -e "s|${old_root}|${new_root}|g" \
     -e "s|horizon-${username}-${old_app}|horizon-${username}-${new_app}|g" \
+    -e "s|queue-${username}-${old_app}|queue-${username}-${new_app}|g" \
     "$file"
   chown "$username:$username" "$file"
 }

@@ -1023,7 +1023,7 @@ ensure_mysql_repo() {
 
   apt-get -y install curl gnupg ca-certificates
   mkdir -p /usr/share/keyrings
-  curl -fsSL https://repo.mysql.com/RPM-GPG-KEY-mysql-2023 | gpg --dearmor | tee /usr/share/keyrings/mysql.gpg >/dev/null
+  curl -fsSL https://repo.mysql.com/RPM-GPG-KEY-mysql-2025 | gpg --dearmor | tee /usr/share/keyrings/mysql.gpg >/dev/null
   chmod 644 /usr/share/keyrings/mysql.gpg
 
   suite="$(debian_codename)"

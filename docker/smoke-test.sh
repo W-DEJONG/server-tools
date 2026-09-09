@@ -183,6 +183,14 @@ grep -q "php${php_version} artisan horizon" /home/testdev/demo/supervisor/horizo
 grep -q "directory=/home/testdev/demo/current/" /home/testdev/demo/supervisor/horizon.conf
 test -L /etc/supervisor/conf.d/testdev_demo.d
 
+echo "==> create-queue testdev demo"
+server-tool create-queue testdev demo -y
+test -f /home/testdev/demo/supervisor/queue.conf
+grep -q "php${php_version} artisan queue:work --sleep=3 --tries=3 --timeout=60 --max-time=3600" /home/testdev/demo/supervisor/queue.conf
+grep -q "directory=/home/testdev/demo/current/" /home/testdev/demo/supervisor/queue.conf
+grep -q "program:queue-testdev-demo" /home/testdev/demo/supervisor/queue.conf
+grep -q "stopwaitsecs=3600" /home/testdev/demo/supervisor/queue.conf
+
 echo "==> enable-basic-auth testdev demo tester"
 server-tool enable-basic-auth testdev demo tester -r Staging -y
 grep -q 'auth_basic "Staging"' /home/testdev/demo/nginx/auth.inc
@@ -233,6 +241,9 @@ test -f /etc/nginx/conf.d/testdev_demo2.conf
 test -L /etc/supervisor/conf.d/testdev_demo2.d
 grep -q "program:horizon-testdev-demo2" /home/testdev/demo2/supervisor/horizon.conf
 grep -q "directory=/home/testdev/demo2/current/" /home/testdev/demo2/supervisor/horizon.conf
+grep -q "program:queue-testdev-demo2" /home/testdev/demo2/supervisor/queue.conf
+grep -q "directory=/home/testdev/demo2/current/" /home/testdev/demo2/supervisor/queue.conf
+grep -q "stdout_logfile=/home/testdev/demo2/log/queue.log" /home/testdev/demo2/supervisor/queue.conf
 grep -q "cd /home/testdev/demo2/current && php${php_version} artisan schedule:run" /home/testdev/demo2/cron/scheduler
 grep -qF "php /home/testdev/demo2/current/artisan extra:job" /home/testdev/demo2/cron/extra
 crontab -u testdev -l | grep -qF '# BEGIN server-tool app: testdev/demo2'

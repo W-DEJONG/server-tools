@@ -60,6 +60,7 @@ server-tool enable-ssl <username> <application> [-d <domain>] [-e <email>] [--se
 server-tool enable-basic-auth <username> <application> <auth_user> [-r <realm>] [-y]
 server-tool disable-ssh-password [-y]
 server-tool create-horizon <username> <application> [-p <php-version>] [-n <numprocs>] [-y]
+server-tool create-queue <username> <application> [-p <php-version>] [-n <numprocs>] [-q <queue>] [-c <connection>] [--tries <n>] [--timeout <seconds>] [--sleep <seconds>] [-y]
 server-tool apply-cron <username> <application> [-y]
 server-tool enable-scheduler <username> <application> [-p <php-version>] [-y]
 server-tool disable-scheduler <username> <application> [-y]

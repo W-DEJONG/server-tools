@@ -1,0 +1,184 @@
+#!/bin/bash
+set -eo pipefail
+
+php_version=""
+numprocs="1"
+queue=""
+connection=""
+tries="3"
+timeout="60"
+sleep_secs="3"
+positionals=()
+usage="Usage: server-tool create-queue <username> <application> [-p <php-version>] [-n <numprocs>] [-q <queue>] [-c <connection>] [--tries <n>] [--timeout <seconds>] [--sleep <seconds>] [-y]"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -p|--php)
+      if [ -z "${2:-}" ]; then
+        echo "Error: -p requires a PHP version"
+        echo "$usage"
+        exit 1
+      fi
+      php_version="$2"
+      shift 2
+      ;;
+    -n|--numprocs)
+      if [ -z "${2:-}" ]; then
+        echo "Error: -n requires a process count"
+        echo "$usage"
+        exit 1
+      fi
+      numprocs="$2"
+      shift 2
+      ;;
+    -q|--queue)
+      if [ -z "${2:-}" ]; then
+        echo "Error: -q requires a queue name"
+        echo "$usage"
+        exit 1
+      fi
+      queue="$2"
+      shift 2
+      ;;
+    -c|--connection)
+      if [ -z "${2:-}" ]; then
+        echo "Error: -c requires a connection name"
+        echo "$usage"
+        exit 1
+      fi
+      connection="$2"
+      shift 2
+      ;;
+    --tries)
+      if [ -z "${2:-}" ]; then
+        echo "Error: --tries requires a number"
+        echo "$usage"
+        exit 1
+      fi
+      tries="$2"
+      shift 2
+      ;;
+    --timeout)
+      if [ -z "${2:-}" ]; then
+        echo "Error: --timeout requires a number of seconds"
+        echo "$usage"
+        exit 1
+      fi
+      timeout="$2"
+      shift 2
+      ;;
+    --sleep)
+      if [ -z "${2:-}" ]; then
+        echo "Error: --sleep requires a number of seconds"
+        echo "$usage"
+        exit 1
+      fi
+      sleep_secs="$2"
+      shift 2
+      ;;
+    *)
+      positionals+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ ${#positionals[@]} -ne 2 ]; then
+  echo "$usage"
+  exit 1
+fi
+
+if ! [[ "$numprocs" =~ ^[1-9][0-9]*$ ]]; then
+  echo "Error: numprocs must be a positive integer."
+  exit 1
+fi
+
+if ! [[ "$tries" =~ ^[1-9][0-9]*$ ]]; then
+  echo "Error: tries must be a positive integer."
+  exit 1
+fi
+
+if ! [[ "$timeout" =~ ^[0-9]+$ ]]; then
+  echo "Error: timeout must be a non-negative integer."
+  exit 1
+fi
+
+if ! [[ "$sleep_secs" =~ ^[0-9]+$ ]]; then
+  echo "Error: sleep must be a non-negative integer."
+  exit 1
+fi
+
+username="${positionals[0]}"
+app_name="${positionals[1]}"
+require_application "$username" "$app_name"
+
+if [ -n "$php_version" ]; then
+  resolve_versions "$SERVER_TOOL_ROOT/templates/php-versions" \
+    'Which PHP version should the queue worker use? ' \
+    0 \
+    "$php_version"
+  php_version="$SELECTED_VERSION"
+else
+  php_version="$(app_php_version_from_nginx "$APP_NGINX_CONF")"
+fi
+
+if [ -z "$php_version" ]; then
+  echo "Error: could not determine PHP version. Pass -p <php-version>."
+  exit 1
+fi
+
+queue_cmd="php${php_version} artisan queue:work"
+if [ -n "$connection" ]; then
+  queue_cmd+=" ${connection}"
+fi
+if [ -n "$queue" ]; then
+  queue_cmd+=" --queue=${queue}"
+fi
+queue_cmd+=" --sleep=${sleep_secs} --tries=${tries} --timeout=${timeout} --max-time=3600"
+
+echo "Username: $username"
+echo "Application: $app_name"
+echo "PHP version: $php_version"
+echo "Processes: $numprocs"
+echo "Command: $queue_cmd"
+confirm_or_exit "This will create a Supervisor config for a Laravel queue worker. Do you want to proceed? (y/n): "
+
+ensure_app_supervisor "$username" "$app_name" "$APP_ROOT"
+
+queue_conf="$APP_ROOT/supervisor/queue.conf"
+program_name="queue-${username}-${app_name}"
+
+if [ -f "$queue_conf" ]; then
+  echo "Queue supervisor config already exists, leaving it unchanged."
+else
+  cat > "$queue_conf" <<EOF
+[program:${program_name}]
+directory=${APP_ROOT}/current/
+command=${queue_cmd}
+process_name=%(program_name)s_%(process_num)02d
+autostart=true
+autorestart=true
+user=${username}
+numprocs=${numprocs}
+startsecs=1
+redirect_stderr=true
+stdout_logfile=${APP_ROOT}/log/queue.log
+stdout_logfile_maxbytes=5MB
+stdout_logfile_backups=3
+stopwaitsecs=3600
+stopsignal=SIGTERM
+stopasgroup=true
+killasgroup=true
+EOF
+  chown "$username:$username" "$queue_conf"
+fi
+
+reload_supervisor
+
+echo
+echo "Laravel queue worker supervisor config is ready."
+echo "  Config:  $queue_conf"
+echo "  Program: $program_name"
+echo "  Command: $queue_cmd"
+echo "  Log:     $APP_ROOT/log/queue.log"
+echo
+echo "Reload with: supervisorctl reread && supervisorctl update"
