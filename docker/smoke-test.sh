@@ -336,11 +336,16 @@ test -s "/tmp/s3-mock/smoke-bucket/${server_name}/.server-tool-check"
 echo "==> backup-app testdev demo"
 mkdir -p /home/testdev/demo/log /home/testdev/demo/releases/old
 mkdir -p /home/testdev/demo/current/node_modules /home/testdev/demo/current/.git
+mkdir -p /home/testdev/demo/nginx/certs /home/testdev/demo/current/storage/framework /home/testdev/demo/current/storage/logs
 echo secret-log > /home/testdev/demo/log/access.log
 echo old-release > /home/testdev/demo/releases/old/app.php
 echo nm-pkg > /home/testdev/demo/current/node_modules/pkg.js
 echo git-obj > /home/testdev/demo/current/.git/HEAD
-chown -R testdev:testdev /home/testdev/demo/log /home/testdev/demo/releases /home/testdev/demo/install
+echo 'APP_KEY=secret' > /home/testdev/demo/current/.env
+echo 'cert' > /home/testdev/demo/nginx/certs/app.pem
+echo 'cache' > /home/testdev/demo/current/storage/framework/cache
+echo 'applog' > /home/testdev/demo/current/storage/logs/laravel.log
+chown -R testdev:testdev /home/testdev/demo/log /home/testdev/demo/releases /home/testdev/demo/install /home/testdev/demo/nginx
 server-tool backup-app testdev demo -y
 weekday="$(LC_ALL=C date +%A | tr '[:upper:]' '[:lower:]')"
 server_name="$(hostname -s)"
@@ -349,13 +354,18 @@ test -s "$backup_zip"
 unzip -t "$backup_zip" >/dev/null
 zip_list="$(unzip -Z1 "$backup_zip")"
 grep -q 'current/public/index.php' <<< "$zip_list"
-grep -q '^\.env.db$' <<< "$zip_list"
 grep -q '^db/demo-.*\.dump$' <<< "$zip_list"
+! grep -q '^\.env.db$' <<< "$zip_list"
+! grep -q '\.env$' <<< "$zip_list"
 ! grep -q '^log/' <<< "$zip_list"
 ! grep -q '^releases/' <<< "$zip_list"
 ! grep -q 'node_modules' <<< "$zip_list"
 ! grep -q '/\.git/' <<< "$zip_list"
 ! grep -q '^install/' <<< "$zip_list"
+! grep -q 'nginx/certs' <<< "$zip_list"
+! grep -q 'nginx/ssl' <<< "$zip_list"
+! grep -q 'storage/framework' <<< "$zip_list"
+! grep -q 'storage/logs' <<< "$zip_list"
 
 echo "==> verify packages"
 "php${php_version}" -v
