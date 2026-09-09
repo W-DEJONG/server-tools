@@ -70,6 +70,7 @@ server-tool backup-app <username> <application> [-y]
 server-tool backup-app testdev demo -y
 server-tool backup-app <username> <application> --enable [-y]
 server-tool backup-app <username> <application> --disable [-y]
+server-tool test-backup [-y]
 # /etc/server-tool/backup.conf is written by: server-tool install aws <bucket>
 # S3_BUCKET=my-backups
 # S3_REGION=eu-central-1

@@ -266,6 +266,12 @@ if server-tool backup-app testdev demo -y; then
     exit 1
 fi
 
+echo "==> test-backup without config fails"
+if server-tool test-backup -y; then
+    echo "Expected test-backup without config to fail"
+    exit 1
+fi
+
 echo "==> backup-app testdev demo --enable"
 server-tool backup-app testdev demo --enable -y
 test -f /etc/cron.d/server-tool-backup-testdev-demo
@@ -321,6 +327,11 @@ chmod +x /usr/local/bin/aws
 server-tool install aws smoke-bucket -y
 test -f /etc/server-tool/backup.conf
 grep -qxF 'S3_BUCKET=smoke-bucket' /etc/server-tool/backup.conf
+
+echo "==> test-backup"
+server-tool test-backup -y
+server_name="$(hostname -s)"
+test -s "/tmp/s3-mock/smoke-bucket/${server_name}/.server-tool-check"
 
 echo "==> backup-app testdev demo"
 mkdir -p /home/testdev/demo/log /home/testdev/demo/releases/old

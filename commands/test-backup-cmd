@@ -1,0 +1,43 @@
+#!/bin/bash
+set -eo pipefail
+
+if [ $# -ne 0 ]; then
+  echo "Usage: server-tool test-backup [-y]"
+  exit 1
+fi
+
+load_backup_config
+require_aws_cli
+
+s3_uri="s3://${S3_BUCKET}/${SERVER_NAME}/.server-tool-check"
+
+echo "Config: $BACKUP_CONFIG_FILE"
+echo "Server: $SERVER_NAME"
+echo "S3 bucket: $S3_BUCKET"
+if [ -n "${S3_REGION:-}" ]; then
+  echo "S3 region: $S3_REGION"
+fi
+echo "Test object: $s3_uri"
+confirm_or_exit "This will upload a small test object to S3. Do you want to proceed? (y/n): "
+
+workdir=""
+cleanup_test_backup() {
+  if [ -n "$workdir" ] && [ -d "$workdir" ]; then
+    rm -rf "$workdir"
+  fi
+}
+trap cleanup_test_backup EXIT
+
+workdir="$(mktemp -d)"
+chmod 700 "$workdir"
+printf 'server-tool backup check %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SERVER_NAME" > "$workdir/check.txt"
+
+aws_cmd=(aws s3 cp --only-show-errors "$workdir/check.txt" "$s3_uri")
+if [ -n "${S3_REGION:-}" ]; then
+  aws_cmd+=(--region "$S3_REGION")
+fi
+"${aws_cmd[@]}"
+
+echo
+echo "S3 backup configuration is working."
+echo "  Uploaded: $s3_uri"
