@@ -692,10 +692,14 @@ mysql_admin() {
     exit 1
   }
   if db_admin_is_remote; then
-    MYSQL_PWD="${DB_ADMIN_PASSWORD}" "$bin" \
+    # --no-defaults: ignore ~/.my.cnf / debian.cnf (wrong user/password).
+    # --password=: MYSQL_PWD is ignored by some MariaDB clients.
+    "$bin" --no-defaults \
       --host="$DB_ADMIN_HOST" \
       --port="${DB_ADMIN_PORT:-3306}" \
       --user="${DB_ADMIN_USER:-root}" \
+      --password="${DB_ADMIN_PASSWORD}" \
+      --protocol=TCP \
       "$@"
   else
     "$bin" "$@"
