@@ -42,6 +42,8 @@ server-tool install memcached
 server-tool install redis
 server-tool install meilisearch
 server-tool install aws
+server-tool install aws my-backups
+server-tool install aws my-backups -y
 server-tool install postgresql redis php 8.4 -y
 
 # Install web application users and folders
@@ -64,6 +66,14 @@ server-tool disable-scheduler <username> <application> [-y]
 server-tool create-db <db_name> [-t pgsql|mysql] [-y]
 server-tool dump-db <username> <application> [<target-folder>] [-y]
 server-tool restore-db <username> <application> <file> [-y]
+server-tool backup-app <username> <application> [-y]
+server-tool backup-app testdev demo -y
+server-tool backup-app <username> <application> --enable [-y]
+server-tool backup-app <username> <application> --disable [-y]
+# /etc/server-tool/backup.conf is written by: server-tool install aws <bucket>
+# S3_BUCKET=my-backups
+# S3_REGION=eu-central-1
+# SERVER_NAME=web-1
 server-tool create-github-runner <url> <token> [-n <name>] [-l <labels>] [-u <username>] [-y]
 server-tool create-github-runner https://github.com/my-org AAAA -n web-1 -l deploy -y
 ```
@@ -90,7 +100,7 @@ docker compose exec trixie bash
 server-tool init-server -y
 server-tool install php -y 8.5
 
-# Automated smoke test (skips AWS; that package needs an EC2 IAM role)
+# Automated smoke test
 docker compose exec bookworm /usr/local/lib/server-tools/docker/smoke-test.sh
 docker compose exec trixie /usr/local/lib/server-tools/docker/smoke-test.sh
 

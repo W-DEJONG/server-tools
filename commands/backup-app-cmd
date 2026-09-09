@@ -1,0 +1,174 @@
+#!/bin/bash
+set -eo pipefail
+
+usage="Usage: server-tool backup-app <username> <application> [--enable|--disable] [-y]"
+enable_backup=0
+disable_backup=0
+positionals=()
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --enable)
+      enable_backup=1
+      shift
+      ;;
+    --disable)
+      disable_backup=1
+      shift
+      ;;
+    *)
+      positionals+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ ${#positionals[@]} -ne 2 ]; then
+  echo "$usage"
+  exit 1
+fi
+
+if [ "$enable_backup" -eq 1 ] && [ "$disable_backup" -eq 1 ]; then
+  echo "Error: --enable and --disable cannot be used together."
+  echo "$usage"
+  exit 1
+fi
+
+username="${positionals[0]}"
+app_name="${positionals[1]}"
+require_application "$username" "$app_name"
+cron_file="$(app_backup_cron_file "$username" "$app_name")"
+
+if [ "$enable_backup" -eq 1 ]; then
+  echo "Username: $username"
+  echo "Application: $app_name"
+  echo "Cron file: $cron_file"
+  confirm_or_exit "This will enable a daily backup cron for $username/$app_name. Do you want to proceed? (y/n): "
+
+  ensure_cron
+  server_tool_bin="$(command -v server-tool || true)"
+  if [ -z "$server_tool_bin" ]; then
+    server_tool_bin="$SERVER_TOOL_ROOT/server-tool"
+  fi
+
+  cat > "$cron_file" <<EOF
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+0 3 * * * root $server_tool_bin backup-app $username $app_name -y
+EOF
+  chmod 644 "$cron_file"
+
+  echo
+  echo "Daily backup cron enabled for $username/$app_name."
+  echo "  Schedule: 03:00"
+  echo "  File:     $cron_file"
+  exit 0
+fi
+
+if [ "$disable_backup" -eq 1 ]; then
+  echo "Username: $username"
+  echo "Application: $app_name"
+  echo "Cron file: $cron_file"
+  confirm_or_exit "This will disable the daily backup cron for $username/$app_name. Do you want to proceed? (y/n): "
+
+  if [ -f "$cron_file" ]; then
+    rm -f "$cron_file"
+    echo
+    echo "Daily backup cron disabled for $username/$app_name."
+  else
+    echo
+    echo "No backup cron is installed for $username/$app_name."
+  fi
+  exit 0
+fi
+
+load_backup_config
+require_aws_cli
+
+if ! command -v zip >/dev/null 2>&1; then
+  echo "Error: zip is not installed. Run: server-tool init-server"
+  exit 1
+fi
+
+weekday="$(LC_ALL=C date +%A | tr '[:upper:]' '[:lower:]')"
+s3_uri="s3://${S3_BUCKET}/${SERVER_NAME}/${username}/${app_name}/${weekday}.zip"
+
+echo "Username: $username"
+echo "Application: $app_name"
+echo "Server: $SERVER_NAME"
+echo "S3 bucket: $S3_BUCKET"
+if [ -n "${S3_REGION:-}" ]; then
+  echo "S3 region: $S3_REGION"
+fi
+echo "Destination: $s3_uri"
+if [ -f "$APP_ROOT/.env.db" ]; then
+  echo "Database: yes"
+else
+  echo "Database: no (.env.db missing; files only)"
+fi
+confirm_or_exit "This will backup $username/$app_name and upload it to S3. Do you want to proceed? (y/n): "
+
+workdir=""
+cleanup_backup_workdir() {
+  if [ -n "$workdir" ] && [ -d "$workdir" ]; then
+    rm -rf "$workdir"
+  fi
+}
+trap cleanup_backup_workdir EXIT
+
+workdir="$(mktemp -d)"
+chmod 700 "$workdir"
+zip_file="$workdir/${app_name}-${weekday}.zip"
+
+if [ -f "$APP_ROOT/.env.db" ]; then
+  mkdir -p "$workdir/db"
+  "$SERVER_TOOL_ROOT/server-tool" dump-db -y "$username" "$app_name" "$workdir/db"
+else
+  echo "Warning: database credentials file not found: $APP_ROOT/.env.db"
+  echo "Continuing with a files-only backup."
+fi
+
+zip_excludes=(
+  -x "log/*"
+  -x "log/"
+  -x "releases/*"
+  -x "releases/"
+  -x "node_modules/*"
+  -x "node_modules/"
+  -x "*/node_modules/*"
+  -x "*/node_modules/"
+  -x ".git/*"
+  -x ".git/"
+  -x "*/.git/*"
+  -x "*/.git/"
+)
+if [ -L "$APP_ROOT/current" ]; then
+  current_target="$(readlink "$APP_ROOT/current")"
+  current_target="${current_target%/}"
+  case "$current_target" in
+    install|./install)
+      zip_excludes+=(-x "install/*" -x "install/")
+      ;;
+  esac
+fi
+
+echo "Creating archive..."
+(
+  cd "$APP_ROOT"
+  zip -r "$zip_file" . "${zip_excludes[@]}"
+)
+
+if [ -d "$workdir/db" ]; then
+  (cd "$workdir" && zip -r "$zip_file" db)
+fi
+
+echo "Uploading archive to $s3_uri"
+aws_cmd=(aws s3 cp --only-show-errors "$zip_file" "$s3_uri")
+if [ -n "${S3_REGION:-}" ]; then
+  aws_cmd+=(--region "$S3_REGION")
+fi
+"${aws_cmd[@]}"
+
+echo
+echo "Backup uploaded to $s3_uri"

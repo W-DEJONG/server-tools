@@ -9,9 +9,9 @@ is_package() {
   [ -e "$packages_dir/install-$1" ]
 }
 
-is_versioned_package() {
+package_accepts_args() {
   case "$1" in
-    php|npm|postgresql) return 0 ;;
+    php|npm|postgresql|aws) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -31,7 +31,7 @@ while [ $# -gt 0 ]; do
     pkg_versions+=("")
     current=$((${#pkg_names[@]} - 1))
     shift
-  elif [ -n "$current" ] && is_versioned_package "${pkg_names[$current]}"; then
+  elif [ -n "$current" ] && package_accepts_args "${pkg_names[$current]}"; then
     if [ -n "${pkg_versions[$current]}" ]; then
       pkg_versions[$current]+=" $1"
     else

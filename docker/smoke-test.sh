@@ -260,6 +260,92 @@ test ! -e "/etc/php/${php_version}/fpm/pool.d/testdev_demo2.conf"
 test ! -e /etc/supervisor/conf.d/testdev_demo2.d
 ! grep -qF '# BEGIN server-tool app: testdev/demo2' <<< "$(crontab -u testdev -l 2>/dev/null || true)"
 
+echo "==> backup-app without config fails"
+if server-tool backup-app testdev demo -y; then
+    echo "Expected backup-app without config to fail"
+    exit 1
+fi
+
+echo "==> backup-app testdev demo --enable"
+server-tool backup-app testdev demo --enable -y
+test -f /etc/cron.d/server-tool-backup-testdev-demo
+grep -q 'PATH=' /etc/cron.d/server-tool-backup-testdev-demo
+grep -qF 'backup-app testdev demo -y' /etc/cron.d/server-tool-backup-testdev-demo
+
+echo "==> backup-app testdev demo --disable"
+server-tool backup-app testdev demo --disable -y
+test ! -f /etc/cron.d/server-tool-backup-testdev-demo
+
+echo "==> install aws smoke-bucket (stub CLI)"
+cat > /usr/local/bin/aws <<'EOF'
+#!/bin/bash
+set -e
+if [ "$1" != "s3" ] || [ "$2" != "cp" ]; then
+    echo "aws stub: unexpected: $*" >&2
+    exit 1
+fi
+shift 2
+src=""
+dest=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --only-show-errors)
+            shift
+            ;;
+        --region)
+            shift 2
+            ;;
+        s3://*)
+            dest="$1"
+            shift
+            ;;
+        *)
+            if [ -z "$src" ]; then
+                src="$1"
+            else
+                dest="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+if [ -z "$src" ] || [ -z "$dest" ]; then
+    echo "aws stub: missing src or dest" >&2
+    exit 1
+fi
+rel="${dest#s3://}"
+mkdir -p "/tmp/s3-mock/$(dirname "$rel")"
+cp "$src" "/tmp/s3-mock/$rel"
+EOF
+chmod +x /usr/local/bin/aws
+server-tool install aws smoke-bucket -y
+test -f /etc/server-tool/backup.conf
+grep -qxF 'S3_BUCKET=smoke-bucket' /etc/server-tool/backup.conf
+
+echo "==> backup-app testdev demo"
+mkdir -p /home/testdev/demo/log /home/testdev/demo/releases/old
+mkdir -p /home/testdev/demo/current/node_modules /home/testdev/demo/current/.git
+echo secret-log > /home/testdev/demo/log/access.log
+echo old-release > /home/testdev/demo/releases/old/app.php
+echo nm-pkg > /home/testdev/demo/current/node_modules/pkg.js
+echo git-obj > /home/testdev/demo/current/.git/HEAD
+chown -R testdev:testdev /home/testdev/demo/log /home/testdev/demo/releases /home/testdev/demo/install
+server-tool backup-app testdev demo -y
+weekday="$(LC_ALL=C date +%A | tr '[:upper:]' '[:lower:]')"
+server_name="$(hostname -s)"
+backup_zip="/tmp/s3-mock/smoke-bucket/${server_name}/testdev/demo/${weekday}.zip"
+test -s "$backup_zip"
+unzip -t "$backup_zip" >/dev/null
+zip_list="$(unzip -Z1 "$backup_zip")"
+grep -q 'current/public/index.php' <<< "$zip_list"
+grep -q '^\.env.db$' <<< "$zip_list"
+grep -q '^db/demo-.*\.dump$' <<< "$zip_list"
+! grep -q '^log/' <<< "$zip_list"
+! grep -q '^releases/' <<< "$zip_list"
+! grep -q 'node_modules' <<< "$zip_list"
+! grep -q '/\.git/' <<< "$zip_list"
+! grep -q '^install/' <<< "$zip_list"
+
 echo "==> verify packages"
 "php${php_version}" -v
 node -v

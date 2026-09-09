@@ -1054,3 +1054,81 @@ ensure_nginx_repo() {
   printf 'Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 900\n' > /etc/apt/preferences.d/99nginx
   apt-get update
 }
+
+BACKUP_CONFIG_FILE="/etc/server-tool/backup.conf"
+
+validate_s3_bucket_name() {
+  local name="$1"
+
+  case "$name" in
+    ""|*/*|*" "*|*[[:space:]]*)
+      echo "Error: invalid S3 bucket name '$name'"
+      exit 1
+      ;;
+  esac
+}
+
+write_backup_config() {
+  local bucket="$1"
+  local region=""
+  local server=""
+
+  validate_s3_bucket_name "$bucket"
+
+  mkdir -p "$(dirname "$BACKUP_CONFIG_FILE")"
+  if [ -f "$BACKUP_CONFIG_FILE" ]; then
+    region="$(sed -n 's/^S3_REGION=//p' "$BACKUP_CONFIG_FILE" | head -1)"
+    server="$(sed -n 's/^SERVER_NAME=//p' "$BACKUP_CONFIG_FILE" | head -1)"
+  fi
+
+  {
+    echo "S3_BUCKET=$bucket"
+    if [ -n "$region" ]; then
+      echo "S3_REGION=$region"
+    fi
+    if [ -n "$server" ]; then
+      echo "SERVER_NAME=$server"
+    fi
+  } > "$BACKUP_CONFIG_FILE"
+  chmod 640 "$BACKUP_CONFIG_FILE"
+}
+
+load_backup_config() {
+  S3_BUCKET=""
+  S3_REGION=""
+  SERVER_NAME=""
+
+  if [ ! -f "$BACKUP_CONFIG_FILE" ]; then
+    echo "Error: backup config not found: $BACKUP_CONFIG_FILE"
+    echo "Run: server-tool install aws [<bucket>]"
+    exit 1
+  fi
+
+  # shellcheck disable=SC1090
+  source "$BACKUP_CONFIG_FILE"
+
+  if [ -z "${S3_BUCKET:-}" ]; then
+    echo "Error: S3_BUCKET is not set in $BACKUP_CONFIG_FILE"
+    echo "Run: server-tool install aws [<bucket>]"
+    exit 1
+  fi
+
+  validate_s3_bucket_name "$S3_BUCKET"
+
+  if [ -z "${SERVER_NAME:-}" ]; then
+    SERVER_NAME="$(hostname -s)"
+  fi
+}
+
+require_aws_cli() {
+  if ! command -v aws >/dev/null 2>&1; then
+    echo "Error: aws is not installed. Run: server-tool install aws [<bucket>]"
+    exit 1
+  fi
+}
+
+app_backup_cron_file() {
+  local username="$1"
+  local app_name="$2"
+  printf '/etc/cron.d/server-tool-backup-%s-%s\n' "$username" "$app_name"
+}
