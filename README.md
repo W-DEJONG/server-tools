@@ -50,9 +50,11 @@ server-tool install postgresql redis php 8.4 -y
 server-tool create-user <username> [-p <php-version>] [-y]
 server-tool create-sudo-user <username> [-k <ssh-public-key-or-file>] [--no-password] [-y]
 server-tool delete-user <username> [-y]
-server-tool create-app <username> <application> [-u] [-d <db_name>] [-t pgsql|mysql] [-p <php-version>] [-y]
+server-tool create-app <username> <application> [-u] [-d <db_name>] [-t pgsql|mysql] [--host <host>] [--port <port>] [--admin-user <user>] [--admin-password <password>] [--user-host <mysql-user-host>] [-p <php-version>] [-y]
 server-tool create-app testdev demo -u -d mijnapp -p 8.4 -y
 server-tool create-app testdev demo -u -d mijnapp -t mysql -y
+server-tool create-app testdev demo -d mijnapp -t mysql --host db.internal --admin-user root -y
+server-tool create-app testdev demo -d mijnapp -t pgsql --host db.internal --admin-user postgres -y
 server-tool list-apps
 server-tool delete-app <username> <application> [-y]
 server-tool rename-app <username> <application> <new_name> [--keep-domain] [-y]
@@ -64,7 +66,9 @@ server-tool create-queue <username> <application> [-p <php-version>] [-n <numpro
 server-tool apply-cron <username> <application> [-y]
 server-tool enable-scheduler <username> <application> [-p <php-version>] [-y]
 server-tool disable-scheduler <username> <application> [-y]
-server-tool create-db <db_name> [-t pgsql|mysql] [-y]
+server-tool create-db <db_name> [-t pgsql|mysql] [--host <host>] [--port <port>] [--admin-user <user>] [--admin-password <password>] [--user-host <mysql-user-host>] [-y]
+server-tool create-db mijnapp -t mysql --host db.internal --admin-user root
+server-tool create-db mijnapp -t pgsql --host db.internal --admin-user postgres
 server-tool dump-db <username> <application> [<target-folder>] [-y]
 server-tool restore-db <username> <application> <file> [-y]
 server-tool backup-app <username> <application> [-y]

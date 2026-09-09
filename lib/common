@@ -246,13 +246,25 @@ package_is_installed() {
   [ "$status" = "install ok installed" ]
 }
 
+postgres_client_available() {
+  command -v psql >/dev/null 2>&1
+}
+
+mysql_client_available() {
+  command -v mysql >/dev/null 2>&1 || command -v mariadb >/dev/null 2>&1
+}
+
 postgres_available() {
-  command -v psql >/dev/null 2>&1 && id postgres &>/dev/null && systemctl is-active --quiet postgresql
+  postgres_client_available && id postgres &>/dev/null && systemctl is-active --quiet postgresql
 }
 
 mysql_available() {
-  { command -v mysql >/dev/null 2>&1 || command -v mariadb >/dev/null 2>&1; } && \
+  mysql_client_available && \
     { systemctl is-active --quiet mariadb || systemctl is-active --quiet mysql; }
+}
+
+db_admin_is_remote() {
+  [ -n "${DB_ADMIN_HOST:-}" ]
 }
 
 mariadb_server_present() {
@@ -307,10 +319,12 @@ db_default_port() {
 }
 
 # resolve_db_type [requested]
+# When DB_ADMIN_HOST is set, a client is enough; otherwise a local server must be running.
 resolve_db_type() {
   local requested
   local pg_ok=0
   local mysql_ok=0
+  local remote=0
   SELECTED_DB_TYPE=""
 
   requested="$(normalize_db_type "${1:-}")"
@@ -320,20 +334,41 @@ resolve_db_type() {
     exit 1
   fi
 
-  if postgres_available; then
-    pg_ok=1
+  if db_admin_is_remote; then
+    remote=1
   fi
-  if mysql_available; then
-    mysql_ok=1
+
+  if [ "$remote" -eq 1 ]; then
+    if postgres_client_available; then
+      pg_ok=1
+    fi
+    if mysql_client_available; then
+      mysql_ok=1
+    fi
+  else
+    if postgres_available; then
+      pg_ok=1
+    fi
+    if mysql_available; then
+      mysql_ok=1
+    fi
   fi
 
   if [ -n "$requested" ]; then
     if [ "$requested" = "pgsql" ] && [ "$pg_ok" -ne 1 ]; then
-      echo "Error: PostgreSQL is not installed or not running. Run: server-tool install postgresql"
+      if [ "$remote" -eq 1 ]; then
+        echo "Error: psql is not installed. Run: server-tool install postgresql"
+      else
+        echo "Error: PostgreSQL is not installed or not running. Run: server-tool install postgresql"
+      fi
       exit 1
     fi
     if [ "$requested" = "mysql" ] && [ "$mysql_ok" -ne 1 ]; then
-      echo "Error: MySQL/MariaDB is not installed or not running. Run: server-tool install mysql or server-tool install mariadb-server"
+      if [ "$remote" -eq 1 ]; then
+        echo "Error: MySQL/MariaDB client is not installed. Run: server-tool install mysql-client or server-tool install mariadb-client"
+      else
+        echo "Error: MySQL/MariaDB is not installed or not running. Run: server-tool install mysql or server-tool install mariadb-server"
+      fi
       exit 1
     fi
     SELECTED_DB_TYPE="$requested"
@@ -349,13 +384,22 @@ resolve_db_type() {
     return 0
   fi
   if [ "$pg_ok" -eq 0 ] && [ "$mysql_ok" -eq 0 ]; then
-    echo "Error: no database server is installed."
-    echo "Install one of: server-tool install postgresql, server-tool install mysql, server-tool install mariadb-server"
+    if [ "$remote" -eq 1 ]; then
+      echo "Error: no database client is installed."
+      echo "Install one of: server-tool install postgresql, server-tool install mysql-client, server-tool install mariadb-client"
+    else
+      echo "Error: no database server is installed."
+      echo "Install one of: server-tool install postgresql, server-tool install mysql, server-tool install mariadb-server"
+    fi
     exit 1
   fi
 
   if [ "${ASSUME_YES:-0}" = "1" ]; then
-    echo "Error: both PostgreSQL and MySQL/MariaDB are installed. Specify -t pgsql or -t mysql."
+    if [ "$remote" -eq 1 ]; then
+      echo "Error: both PostgreSQL and MySQL clients are available. Specify -t pgsql or -t mysql."
+    else
+      echo "Error: both PostgreSQL and MySQL/MariaDB are installed. Specify -t pgsql or -t mysql."
+    fi
     exit 1
   fi
 
@@ -374,6 +418,139 @@ resolve_db_type() {
     esac
     echo "Invalid selection."
   done
+}
+
+# try_parse_remote_db_option -- consume --host/--port/--admin-* /--user-host
+# Sets CONSUMED to the number of args used. Return 0 if the option was recognized.
+try_parse_remote_db_option() {
+  CONSUMED=0
+  case "$1" in
+    --host)
+      if [ -z "${2:-}" ]; then
+        echo "Error: --host requires a hostname"
+        exit 1
+      fi
+      DB_ADMIN_HOST="$2"
+      CONSUMED=2
+      return 0
+      ;;
+    --port)
+      if [ -z "${2:-}" ] || ! [[ "$2" =~ ^[0-9]+$ ]]; then
+        echo "Error: --port requires a numeric port"
+        exit 1
+      fi
+      DB_ADMIN_PORT="$2"
+      CONSUMED=2
+      return 0
+      ;;
+    --admin-user)
+      if [ -z "${2:-}" ]; then
+        echo "Error: --admin-user requires a username"
+        exit 1
+      fi
+      DB_ADMIN_USER="$2"
+      CONSUMED=2
+      return 0
+      ;;
+    --admin-password)
+      if [ $# -ge 2 ]; then
+        DB_ADMIN_PASSWORD="$2"
+        CONSUMED=2
+      else
+        DB_ADMIN_PASSWORD=""
+        CONSUMED=1
+      fi
+      DB_ADMIN_PASSWORD_PROVIDED=1
+      return 0
+      ;;
+    --user-host)
+      if [ -z "${2:-}" ]; then
+        echo "Error: --user-host requires a MySQL user host"
+        exit 1
+      fi
+      if ! [[ "$2" =~ ^[a-zA-Z0-9._:%-]+$ ]]; then
+        echo "Error: invalid --user-host '$2'"
+        exit 1
+      fi
+      MYSQL_USER_HOST="$2"
+      CONSUMED=2
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+require_db_name_for_remote_opts() {
+  if [ -n "${DB_ADMIN_HOST:-}" ] || [ -n "${DB_ADMIN_PORT:-}" ] || [ -n "${DB_ADMIN_USER:-}" ] \
+    || [ "${DB_ADMIN_PASSWORD_PROVIDED:-0}" = "1" ] || [ -n "${MYSQL_USER_HOST:-}" ]; then
+    echo "Error: --host / --port / --admin-user / --admin-password / --user-host require -d <db_name>"
+    exit 1
+  fi
+}
+
+resolve_remote_db_opts() {
+  if [ -n "${MYSQL_USER_HOST:-}" ] && [ "${SELECTED_DB_TYPE}" = "pgsql" ]; then
+    echo "Error: --user-host is only valid for MySQL."
+    exit 1
+  fi
+
+  if ! db_admin_is_remote; then
+    if [ -z "${MYSQL_USER_HOST:-}" ]; then
+      MYSQL_USER_HOST=localhost
+    fi
+    return 0
+  fi
+
+  if [ -z "${DB_ADMIN_PORT:-}" ]; then
+    DB_ADMIN_PORT="$(db_default_port)"
+  fi
+
+  if [ -z "${DB_ADMIN_USER:-}" ]; then
+    if [ "$SELECTED_DB_TYPE" = "mysql" ]; then
+      DB_ADMIN_USER=root
+    else
+      DB_ADMIN_USER=postgres
+    fi
+  fi
+
+  if [ "${DB_ADMIN_PASSWORD_PROVIDED:-0}" != "1" ]; then
+    if [ "${ASSUME_YES:-0}" = "1" ]; then
+      echo "Error: --admin-password is required when using --host with -y."
+      exit 1
+    fi
+    local prompt_label
+    prompt_label="$(db_type_label)"
+    read -r -s -p "${prompt_label} admin password for ${DB_ADMIN_USER}@${DB_ADMIN_HOST}: " DB_ADMIN_PASSWORD
+    echo
+    DB_ADMIN_PASSWORD_PROVIDED=1
+  fi
+
+  if [ -z "${MYSQL_USER_HOST:-}" ]; then
+    case "$DB_ADMIN_HOST" in
+      localhost|127.0.0.1)
+        MYSQL_USER_HOST=localhost
+        ;;
+      *)
+        MYSQL_USER_HOST='%'
+        ;;
+    esac
+  fi
+}
+
+app_db_host() {
+  if db_admin_is_remote; then
+    printf '%s\n' "$DB_ADMIN_HOST"
+  else
+    printf '%s\n' 127.0.0.1
+  fi
+}
+
+app_db_port() {
+  if [ -n "${DB_ADMIN_PORT:-}" ]; then
+    printf '%s\n' "$DB_ADMIN_PORT"
+  else
+    db_default_port
+  fi
 }
 
 validate_db_name() {
@@ -398,6 +575,27 @@ random_db_password() {
   fi
 }
 
+postgres_admin() {
+  if db_admin_is_remote; then
+    if ! postgres_client_available; then
+      echo "Error: psql is not installed. Run: server-tool install postgresql"
+      exit 1
+    fi
+    PGPASSWORD="${DB_ADMIN_PASSWORD}" psql \
+      --host="$DB_ADMIN_HOST" \
+      --port="${DB_ADMIN_PORT:-5432}" \
+      --username="${DB_ADMIN_USER:-postgres}" \
+      --dbname=postgres \
+      "$@"
+  else
+    if ! command -v psql >/dev/null 2>&1 || ! id postgres &>/dev/null; then
+      echo "Error: PostgreSQL is not installed. Run: server-tool install postgresql"
+      exit 1
+    fi
+    sudo -u postgres psql "$@"
+  fi
+}
+
 create_postgres_database() {
   local db_name="$1"
   CREATED_DB_PASSWORD=""
@@ -412,22 +610,34 @@ create_postgres_database() {
 
   validate_db_name "$db_name"
 
-  if ! command -v psql >/dev/null 2>&1 || ! id postgres &>/dev/null; then
-    echo "Error: PostgreSQL is not installed. Run: server-tool install postgresql"
-    exit 1
+  if db_admin_is_remote; then
+    if ! postgres_client_available; then
+      echo "Error: psql is not installed. Run: server-tool install postgresql"
+      exit 1
+    fi
+  else
+    if ! command -v psql >/dev/null 2>&1 || ! id postgres &>/dev/null; then
+      echo "Error: PostgreSQL is not installed. Run: server-tool install postgresql"
+      exit 1
+    fi
+
+    if ! systemctl is-active --quiet postgresql; then
+      echo "Error: PostgreSQL is not running."
+      exit 1
+    fi
   fi
 
-  if ! systemctl is-active --quiet postgresql; then
-    echo "Error: PostgreSQL is not running."
+  if ! postgres_admin -v ON_ERROR_STOP=1 -c "SELECT 1" >/dev/null; then
+    echo "Error: could not connect to PostgreSQL as admin."
     exit 1
   fi
 
   local role_exists=0
   local db_exists=0
-  if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = '$db_name'" | grep -qx 1; then
+  if postgres_admin -tAc "SELECT 1 FROM pg_roles WHERE rolname = '$db_name'" | grep -qx 1; then
     role_exists=1
   fi
-  if sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname = '$db_name'" | grep -qx 1; then
+  if postgres_admin -tAc "SELECT 1 FROM pg_database WHERE datname = '$db_name'" | grep -qx 1; then
     db_exists=1
   fi
 
@@ -444,8 +654,8 @@ create_postgres_database() {
   local password
   password="$(random_db_password)"
 
-  sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE USER \"${db_name}\" WITH PASSWORD '${password}';"
-  sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${db_name}\" OWNER \"${db_name}\";"
+  postgres_admin -v ON_ERROR_STOP=1 -c "CREATE USER \"${db_name}\" WITH PASSWORD '${password}';"
+  postgres_admin -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${db_name}\" OWNER \"${db_name}\";"
 
   CREATED_DB_PASSWORD="$password"
   CREATED_DB_IS_NEW=1
@@ -475,17 +685,26 @@ mysql_dump_bin() {
   return 1
 }
 
-mysql_root() {
+mysql_admin() {
   local bin
   bin="$(mysql_cli_bin)" || {
     echo "Error: MySQL/MariaDB client is not installed. Run: server-tool install mysql-client or server-tool install mariadb-client"
     exit 1
   }
-  "$bin" "$@"
+  if db_admin_is_remote; then
+    MYSQL_PWD="${DB_ADMIN_PASSWORD}" "$bin" \
+      --host="$DB_ADMIN_HOST" \
+      --port="${DB_ADMIN_PORT:-3306}" \
+      --user="${DB_ADMIN_USER:-root}" \
+      "$@"
+  else
+    "$bin" "$@"
+  fi
 }
 
 create_mysql_database() {
   local db_name="$1"
+  local user_host="${MYSQL_USER_HOST:-localhost}"
   CREATED_DB_PASSWORD=""
   CREATED_DB_IS_NEW=0
 
@@ -498,23 +717,33 @@ create_mysql_database() {
 
   validate_db_name "$db_name"
 
-  if ! mysql_available; then
+  if db_admin_is_remote; then
+    if ! mysql_client_available; then
+      echo "Error: MySQL/MariaDB client is not installed. Run: server-tool install mysql-client or server-tool install mariadb-client"
+      exit 1
+    fi
+  elif ! mysql_available; then
     echo "Error: MySQL/MariaDB is not installed or not running. Run: server-tool install mysql or server-tool install mariadb-server"
+    exit 1
+  fi
+
+  if ! mysql_admin -e "SELECT 1" >/dev/null; then
+    echo "Error: could not connect to MySQL as admin."
     exit 1
   fi
 
   local role_exists=0
   local db_exists=0
-  if mysql_root -N -B -e "SELECT 1 FROM mysql.user WHERE user = '${db_name}' AND host = 'localhost'" | grep -qx 1; then
+  if mysql_admin -N -B -e "SELECT 1 FROM mysql.user WHERE user = '${db_name}' AND host = '${user_host}'" | grep -qx 1; then
     role_exists=1
   fi
-  if mysql_root -N -B -e "SELECT 1 FROM information_schema.schemata WHERE schema_name = '${db_name}'" | grep -qx 1; then
+  if mysql_admin -N -B -e "SELECT 1 FROM information_schema.schemata WHERE schema_name = '${db_name}'" | grep -qx 1; then
     db_exists=1
   fi
 
   if [ "$role_exists" -eq 1 ] || [ "$db_exists" -eq 1 ]; then
     if [ "$role_exists" -eq 1 ]; then
-      echo "MySQL user '$db_name' already exists, leaving password unchanged."
+      echo "MySQL user '$db_name'@'$user_host' already exists, leaving password unchanged."
     fi
     if [ "$db_exists" -eq 1 ]; then
       echo "MySQL database '$db_name' already exists, leaving it unchanged."
@@ -525,10 +754,10 @@ create_mysql_database() {
   local password
   password="$(random_db_password)"
 
-  mysql_root -e "CREATE USER '${db_name}'@'localhost' IDENTIFIED BY '${password}';"
-  mysql_root -e "CREATE DATABASE \`${db_name}\`;"
-  mysql_root -e "GRANT ALL PRIVILEGES ON \`${db_name}\`.* TO '${db_name}'@'localhost';"
-  mysql_root -e "FLUSH PRIVILEGES;"
+  mysql_admin -e "CREATE USER '${db_name}'@'${user_host}' IDENTIFIED BY '${password}';"
+  mysql_admin -e "CREATE DATABASE \`${db_name}\`;"
+  mysql_admin -e "GRANT ALL PRIVILEGES ON \`${db_name}\`.* TO '${db_name}'@'${user_host}';"
+  mysql_admin -e "FLUSH PRIVILEGES;"
 
   CREATED_DB_PASSWORD="$password"
   CREATED_DB_IS_NEW=1
@@ -555,12 +784,14 @@ write_app_db_env() {
   local db_name="$2"
   local password="$3"
   local connection="${SELECTED_DB_TYPE}"
+  local host
   local port
 
-  port="$(db_default_port "$connection")"
+  host="$(app_db_host)"
+  port="$(app_db_port)"
   cat > "$dest" <<EOF
 DB_CONNECTION=$connection
-DB_HOST=127.0.0.1
+DB_HOST=$host
 DB_PORT=$port
 DB_DATABASE=$db_name
 DB_USERNAME=$db_name

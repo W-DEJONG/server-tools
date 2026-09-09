@@ -1,12 +1,16 @@
 #!/bin/bash
 set -eo pipefail
 
-usage="Usage: server-tool create-db <db_name> [-t pgsql|mysql] [-y]"
+usage="Usage: server-tool create-db <db_name> [-t pgsql|mysql] [--host <host>] [--port <port>] [--admin-user <user>] [--admin-password <password>] [--user-host <mysql-user-host>] [-y]"
 db_name=""
 db_type=""
 positionals=()
 
 while [ $# -gt 0 ]; do
+  if try_parse_remote_db_option "$@"; then
+    shift "$CONSUMED"
+    continue
+  fi
   case "$1" in
     -t|--type)
       if [ -z "${2:-}" ]; then
@@ -31,10 +35,19 @@ fi
 
 db_name="${positionals[0]}"
 resolve_db_type "$db_type"
+resolve_remote_db_opts
 
 echo "Database: $db_name"
 echo "User: $db_name"
 echo "Type: $SELECTED_DB_TYPE"
+echo "Host: $(app_db_host)"
+echo "Port: $(app_db_port)"
+if db_admin_is_remote; then
+  echo "Admin user: $DB_ADMIN_USER"
+fi
+if [ "$SELECTED_DB_TYPE" = "mysql" ]; then
+  echo "MySQL user host: $MYSQL_USER_HOST"
+fi
 confirm_or_exit "This will create a $(db_type_label) database and user '$db_name'. Do you want to proceed? (y/n): "
 
 create_database "$db_name"
@@ -48,11 +61,12 @@ echo "$(db_type_label) database is ready."
 echo "  Database: $db_name"
 echo "  User:     $db_name"
 echo "  Password: $CREATED_DB_PASSWORD"
-echo "  Host:     localhost"
+echo "  Host:     $(app_db_host)"
+echo "  Port:     $(app_db_port)"
 echo
 if [ "$SELECTED_DB_TYPE" = "mysql" ]; then
-  echo "Connect: mysql -h localhost -u $db_name -p $db_name"
+  echo "Connect: mysql -h $(app_db_host) -P $(app_db_port) -u $db_name -p $db_name"
 else
-  echo "Connect: psql -h localhost -U $db_name -d $db_name"
+  echo "Connect: psql -h $(app_db_host) -p $(app_db_port) -U $db_name -d $db_name"
 fi
 echo "Store this password now; it is not saved by server-tool."

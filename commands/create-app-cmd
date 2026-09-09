@@ -6,8 +6,12 @@ db_name=""
 db_type=""
 php_version=""
 positionals=()
-usage="Usage: server-tool create-app <username> <application> [-u] [-d <db_name>] [-t pgsql|mysql] [-p <php-version>] [-y]"
+usage="Usage: server-tool create-app <username> <application> [-u] [-d <db_name>] [-t pgsql|mysql] [--host <host>] [--port <port>] [--admin-user <user>] [--admin-password <password>] [--user-host <mysql-user-host>] [-p <php-version>] [-y]"
 while [ $# -gt 0 ]; do
+  if try_parse_remote_db_option "$@"; then
+    shift "$CONSUMED"
+    continue
+  fi
   case "$1" in
     -u|--create-user)
       create_user=1
@@ -60,10 +64,16 @@ echo "Application: $app_name"
 if [ "$create_user" -eq 1 ]; then
   echo "Create user: yes"
 fi
+if [ -z "$db_name" ]; then
+  require_db_name_for_remote_opts
+fi
 if [ -n "$db_name" ]; then
   resolve_db_type "$db_type"
+  resolve_remote_db_opts
   echo "Database: $db_name"
   echo "Database type: $SELECTED_DB_TYPE"
+  echo "Database host: $(app_db_host)"
+  echo "Database port: $(app_db_port)"
 fi
 
 if [ "$create_user" -eq 1 ] || [ -n "$db_name" ]; then

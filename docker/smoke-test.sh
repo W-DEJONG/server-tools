@@ -104,6 +104,33 @@ if server-tool create-db should_fail -y; then
     exit 1
 fi
 
+echo "==> create-db --host without --admin-password fails"
+if server-tool create-db remote_fail -t pgsql --host 127.0.0.1 -y; then
+    echo "Expected create-db --host without --admin-password to fail"
+    exit 1
+fi
+if server-tool create-db remote_fail -t mysql --host 127.0.0.1 -y; then
+    echo "Expected create-db --host without --admin-password to fail"
+    exit 1
+fi
+
+echo "==> create-app remote flags require -d"
+if server-tool create-app testdev nohostapp --host 127.0.0.1 -y; then
+    echo "Expected create-app --host without -d to fail"
+    exit 1
+fi
+
+echo "==> create-app --host without --admin-password fails"
+if server-tool create-app testdev remotefail -d remotefail -t pgsql --host 127.0.0.1 -y; then
+    echo "Expected create-app --host without --admin-password to fail"
+    exit 1
+fi
+if server-tool create-app testdev remotefail -d remotefail -t mysql --host 127.0.0.1 -y; then
+    echo "Expected create-app --host without --admin-password to fail"
+    exit 1
+fi
+test ! -e /home/testdev/remotefail
+
 echo "==> create-app testdev demo -d dump_testdb -t pgsql"
 server-tool create-app testdev demo -d dump_testdb -t pgsql -y
 
@@ -135,6 +162,7 @@ test -L /etc/supervisor/conf.d/testdev_demo.d
 test -f /home/testdev/demo/nginx/auth.inc
 test -f /home/testdev/demo/.env.db
 grep -q '^DB_CONNECTION=pgsql' /home/testdev/demo/.env.db
+grep -q '^DB_HOST=127.0.0.1' /home/testdev/demo/.env.db
 grep -q '^DB_DATABASE=dump_testdb' /home/testdev/demo/.env.db
 
 echo "==> list-apps"
@@ -158,6 +186,7 @@ echo "==> create-app testdev mysqlapp -d smoke_mysqlapp -t mysql"
 server-tool create-app testdev mysqlapp -d smoke_mysqlapp -t mysql -y
 test -f /home/testdev/mysqlapp/.env.db
 grep -q '^DB_CONNECTION=mysql' /home/testdev/mysqlapp/.env.db
+grep -q '^DB_HOST=127.0.0.1' /home/testdev/mysqlapp/.env.db
 grep -q '^DB_PORT=3306' /home/testdev/mysqlapp/.env.db
 grep -q '^DB_DATABASE=smoke_mysqlapp' /home/testdev/mysqlapp/.env.db
 
