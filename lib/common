@@ -118,6 +118,25 @@ app_server_name_from_nginx() {
   sed -n 's/^[[:space:]]*server_name[[:space:]]*\([^;[:space:]]*\).*/\1/p' "$conf" | head -1
 }
 
+app_server_names_from_nginx() {
+  local conf="$1"
+  awk '
+    /^[[:space:]]*server_name[[:space:]]+/ {
+      line = $0
+      sub(/^[[:space:]]*server_name[[:space:]]+/, "", line)
+      sub(/;.*/, "", line)
+      n = split(line, names, /[[:space:]]+/)
+      for (i = 1; i <= n; i++) {
+        if (names[i] != "" && !seen[names[i]]++) {
+          if (out != "") out = out " "
+          out = out names[i]
+        }
+      }
+    }
+    END { print out }
+  ' "$conf"
+}
+
 render_nginx_app_conf() {
   local template="$1"
   local dest="$2"
@@ -221,6 +240,164 @@ resolve_versions() {
   SELECTED_VERSION="${SELECTED_VERSIONS[0]}"
 }
 
+package_is_installed() {
+  local status
+  status="$(dpkg-query -W -f='${Status}' "$1" 2>/dev/null || true)"
+  [ "$status" = "install ok installed" ]
+}
+
+postgres_available() {
+  command -v psql >/dev/null 2>&1 && id postgres &>/dev/null && systemctl is-active --quiet postgresql
+}
+
+mysql_available() {
+  { command -v mysql >/dev/null 2>&1 || command -v mariadb >/dev/null 2>&1; } && \
+    { systemctl is-active --quiet mariadb || systemctl is-active --quiet mysql; }
+}
+
+mariadb_server_present() {
+  package_is_installed mariadb-server || systemctl is-active --quiet mariadb
+}
+
+mysql_server_present() {
+  package_is_installed mysql-community-server
+}
+
+refuse_if_mariadb_installed() {
+  if mariadb_server_present || package_is_installed mariadb-client; then
+    echo "Error: MariaDB is already installed. MySQL and MariaDB cannot be installed together."
+    exit 1
+  fi
+}
+
+refuse_if_mysql_installed() {
+  if mysql_server_present || package_is_installed mysql-community-client; then
+    echo "Error: MySQL is already installed. MySQL and MariaDB cannot be installed together."
+    exit 1
+  fi
+}
+
+normalize_db_type() {
+  case "$1" in
+    pgsql|postgresql|postgres)
+      printf '%s\n' pgsql
+      ;;
+    mysql|mariadb)
+      printf '%s\n' mysql
+      ;;
+    *)
+      printf '%s\n' ''
+      ;;
+  esac
+}
+
+db_type_label() {
+  case "${1:-$SELECTED_DB_TYPE}" in
+    pgsql) printf '%s\n' PostgreSQL ;;
+    mysql) printf '%s\n' MySQL ;;
+    *) printf '%s\n' Database ;;
+  esac
+}
+
+db_default_port() {
+  case "${1:-$SELECTED_DB_TYPE}" in
+    mysql) printf '%s\n' 3306 ;;
+    *) printf '%s\n' 5432 ;;
+  esac
+}
+
+# resolve_db_type [requested]
+resolve_db_type() {
+  local requested
+  local pg_ok=0
+  local mysql_ok=0
+  SELECTED_DB_TYPE=""
+
+  requested="$(normalize_db_type "${1:-}")"
+
+  if [ -n "${1:-}" ] && [ -z "$requested" ]; then
+    echo "Error: unsupported database type '$1'. Use pgsql or mysql."
+    exit 1
+  fi
+
+  if postgres_available; then
+    pg_ok=1
+  fi
+  if mysql_available; then
+    mysql_ok=1
+  fi
+
+  if [ -n "$requested" ]; then
+    if [ "$requested" = "pgsql" ] && [ "$pg_ok" -ne 1 ]; then
+      echo "Error: PostgreSQL is not installed or not running. Run: server-tool install postgresql"
+      exit 1
+    fi
+    if [ "$requested" = "mysql" ] && [ "$mysql_ok" -ne 1 ]; then
+      echo "Error: MySQL/MariaDB is not installed or not running. Run: server-tool install mysql or server-tool install mariadb-server"
+      exit 1
+    fi
+    SELECTED_DB_TYPE="$requested"
+    return 0
+  fi
+
+  if [ "$pg_ok" -eq 1 ] && [ "$mysql_ok" -eq 0 ]; then
+    SELECTED_DB_TYPE=pgsql
+    return 0
+  fi
+  if [ "$mysql_ok" -eq 1 ] && [ "$pg_ok" -eq 0 ]; then
+    SELECTED_DB_TYPE=mysql
+    return 0
+  fi
+  if [ "$pg_ok" -eq 0 ] && [ "$mysql_ok" -eq 0 ]; then
+    echo "Error: no database server is installed."
+    echo "Install one of: server-tool install postgresql, server-tool install mysql, server-tool install mariadb-server"
+    exit 1
+  fi
+
+  if [ "${ASSUME_YES:-0}" = "1" ]; then
+    echo "Error: both PostgreSQL and MySQL/MariaDB are installed. Specify -t pgsql or -t mysql."
+    exit 1
+  fi
+
+  local choice
+  PS3="Which database should be used? "
+  select choice in PostgreSQL MySQL; do
+    case "$choice" in
+      PostgreSQL)
+        SELECTED_DB_TYPE=pgsql
+        return 0
+        ;;
+      MySQL)
+        SELECTED_DB_TYPE=mysql
+        return 0
+        ;;
+    esac
+    echo "Invalid selection."
+  done
+}
+
+validate_db_name() {
+  local db_name="$1"
+
+  if ! [[ "$db_name" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]; then
+    echo "Error: database name may only contain letters, numbers, underscores and hyphens, and must start with a letter or underscore."
+    exit 1
+  fi
+
+  if [ "${#db_name}" -gt 63 ]; then
+    echo "Error: database name must be at most 63 characters."
+    exit 1
+  fi
+}
+
+random_db_password() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 16
+  else
+    dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n'
+  fi
+}
+
 create_postgres_database() {
   local db_name="$1"
   CREATED_DB_PASSWORD=""
@@ -233,15 +410,7 @@ create_postgres_database() {
       ;;
   esac
 
-  if ! [[ "$db_name" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]; then
-    echo "Error: database name may only contain letters, numbers, underscores and hyphens, and must start with a letter or underscore."
-    exit 1
-  fi
-
-  if [ "${#db_name}" -gt 63 ]; then
-    echo "Error: database name must be at most 63 characters."
-    exit 1
-  fi
+  validate_db_name "$db_name"
 
   if ! command -v psql >/dev/null 2>&1 || ! id postgres &>/dev/null; then
     echo "Error: PostgreSQL is not installed. Run: server-tool install postgresql"
@@ -273,11 +442,7 @@ create_postgres_database() {
   fi
 
   local password
-  if command -v openssl >/dev/null 2>&1; then
-    password="$(openssl rand -hex 16)"
-  else
-    password="$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')"
-  fi
+  password="$(random_db_password)"
 
   sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE USER \"${db_name}\" WITH PASSWORD '${password}';"
   sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${db_name}\" OWNER \"${db_name}\";"
@@ -286,12 +451,168 @@ create_postgres_database() {
   CREATED_DB_IS_NEW=1
 }
 
+mysql_cli_bin() {
+  if command -v mysql >/dev/null 2>&1; then
+    printf '%s\n' mysql
+    return 0
+  fi
+  if command -v mariadb >/dev/null 2>&1; then
+    printf '%s\n' mariadb
+    return 0
+  fi
+  return 1
+}
+
+mysql_dump_bin() {
+  if command -v mysqldump >/dev/null 2>&1; then
+    printf '%s\n' mysqldump
+    return 0
+  fi
+  if command -v mariadb-dump >/dev/null 2>&1; then
+    printf '%s\n' mariadb-dump
+    return 0
+  fi
+  return 1
+}
+
+mysql_root() {
+  local bin
+  bin="$(mysql_cli_bin)" || {
+    echo "Error: MySQL/MariaDB client is not installed. Run: server-tool install mysql-client or server-tool install mariadb-client"
+    exit 1
+  }
+  "$bin" "$@"
+}
+
+create_mysql_database() {
+  local db_name="$1"
+  CREATED_DB_PASSWORD=""
+  CREATED_DB_IS_NEW=0
+
+  case "$db_name" in
+    mysql|information_schema|performance_schema|sys|root|admin)
+      echo "Error: refusing to create database '$db_name'"
+      exit 1
+      ;;
+  esac
+
+  validate_db_name "$db_name"
+
+  if ! mysql_available; then
+    echo "Error: MySQL/MariaDB is not installed or not running. Run: server-tool install mysql or server-tool install mariadb-server"
+    exit 1
+  fi
+
+  local role_exists=0
+  local db_exists=0
+  if mysql_root -N -B -e "SELECT 1 FROM mysql.user WHERE user = '${db_name}' AND host = 'localhost'" | grep -qx 1; then
+    role_exists=1
+  fi
+  if mysql_root -N -B -e "SELECT 1 FROM information_schema.schemata WHERE schema_name = '${db_name}'" | grep -qx 1; then
+    db_exists=1
+  fi
+
+  if [ "$role_exists" -eq 1 ] || [ "$db_exists" -eq 1 ]; then
+    if [ "$role_exists" -eq 1 ]; then
+      echo "MySQL user '$db_name' already exists, leaving password unchanged."
+    fi
+    if [ "$db_exists" -eq 1 ]; then
+      echo "MySQL database '$db_name' already exists, leaving it unchanged."
+    fi
+    return 0
+  fi
+
+  local password
+  password="$(random_db_password)"
+
+  mysql_root -e "CREATE USER '${db_name}'@'localhost' IDENTIFIED BY '${password}';"
+  mysql_root -e "CREATE DATABASE \`${db_name}\`;"
+  mysql_root -e "GRANT ALL PRIVILEGES ON \`${db_name}\`.* TO '${db_name}'@'localhost';"
+  mysql_root -e "FLUSH PRIVILEGES;"
+
+  CREATED_DB_PASSWORD="$password"
+  CREATED_DB_IS_NEW=1
+}
+
+create_database() {
+  local db_name="$1"
+  case "${SELECTED_DB_TYPE:-}" in
+    pgsql)
+      create_postgres_database "$db_name"
+      ;;
+    mysql)
+      create_mysql_database "$db_name"
+      ;;
+    *)
+      echo "Error: database type is not selected."
+      exit 1
+      ;;
+  esac
+}
+
+write_app_db_env() {
+  local dest="$1"
+  local db_name="$2"
+  local password="$3"
+  local connection="${SELECTED_DB_TYPE}"
+  local port
+
+  port="$(db_default_port "$connection")"
+  cat > "$dest" <<EOF
+DB_CONNECTION=$connection
+DB_HOST=127.0.0.1
+DB_PORT=$port
+DB_DATABASE=$db_name
+DB_USERNAME=$db_name
+DB_PASSWORD=$password
+EOF
+  chmod 640 "$dest"
+}
+
 require_postgres_client() {
   local tool="$1"
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "Error: $tool is not installed. Run: server-tool install postgresql"
     exit 1
   fi
+}
+
+require_mysql_client() {
+  local tool="$1"
+  case "$tool" in
+    mysql|mariadb)
+      if mysql_cli_bin >/dev/null; then
+        return 0
+      fi
+      ;;
+    mysqldump|mariadb-dump)
+      if mysql_dump_bin >/dev/null; then
+        return 0
+      fi
+      ;;
+    *)
+      if command -v "$tool" >/dev/null 2>&1; then
+        return 0
+      fi
+      ;;
+  esac
+
+  echo "Error: $tool is not installed. Run: server-tool install mysql-client or server-tool install mariadb-client"
+  exit 1
+}
+
+mysql_dump_is_gzip() {
+  local file="$1"
+  local magic
+
+  case "$file" in
+    *.gz|*.gzip)
+      return 0
+      ;;
+  esac
+
+  magic="$(od -An -tx1 -N2 "$file" | tr -d ' \n')"
+  [ "$magic" = "1f8b" ]
 }
 
 load_app_db_env() {
@@ -353,17 +674,25 @@ load_app_db_env() {
     esac
   done < "$env_file"
 
-  if [ -n "$DB_CONNECTION" ] && [ "$DB_CONNECTION" != "pgsql" ]; then
-    echo "Error: only PostgreSQL databases are supported (DB_CONNECTION=$DB_CONNECTION)."
-    exit 1
-  fi
+  case "${DB_CONNECTION:-pgsql}" in
+    pgsql|postgresql|postgres)
+      DB_CONNECTION=pgsql
+      DB_PORT="${DB_PORT:-5432}"
+      ;;
+    mysql|mariadb)
+      DB_CONNECTION=mysql
+      DB_PORT="${DB_PORT:-3306}"
+      ;;
+    *)
+      echo "Error: unsupported database type (DB_CONNECTION=$DB_CONNECTION)."
+      exit 1
+      ;;
+  esac
 
   if [ -z "$DB_HOST" ] || [ -z "$DB_DATABASE" ] || [ -z "$DB_USERNAME" ]; then
     echo "Error: $env_file is missing required DB_HOST, DB_DATABASE or DB_USERNAME."
     exit 1
   fi
-
-  DB_PORT="${DB_PORT:-5432}"
 }
 
 apply_app_nginx_acl() {
@@ -680,6 +1009,35 @@ ensure_redis_repo() {
 ensure_mariadb_repo() {
   apt-get -y install curl ca-certificates
   curl -LsS https://r.mariadb.com/downloads/mariadb_repo_setup | bash -s -- --mariadb-server-version=mariadb-11.8 --skip-maxscale --skip-tools
+}
+
+write_mysql_sources_list() {
+  local suite="$1"
+  cat > /etc/apt/sources.list.d/mysql.list <<EOF
+deb [signed-by=/usr/share/keyrings/mysql.gpg] https://repo.mysql.com/apt/debian ${suite} mysql-8.4-lts
+EOF
+}
+
+ensure_mysql_repo() {
+  local suite
+
+  apt-get -y install curl gnupg ca-certificates
+  mkdir -p /usr/share/keyrings
+  curl -fsSL https://repo.mysql.com/RPM-GPG-KEY-mysql-2023 | gpg --dearmor | tee /usr/share/keyrings/mysql.gpg >/dev/null
+  chmod 644 /usr/share/keyrings/mysql.gpg
+
+  suite="$(debian_codename)"
+  write_mysql_sources_list "$suite"
+  if ! apt-get update; then
+    if [ "$suite" != "bookworm" ]; then
+      echo "Official MySQL repo is not available for $suite; falling back to bookworm."
+      write_mysql_sources_list bookworm
+      apt-get update
+    else
+      echo "Error: failed to update package lists from the MySQL repository."
+      exit 1
+    fi
+  fi
 }
 
 ensure_meilisearch_repo() {

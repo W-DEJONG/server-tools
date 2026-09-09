@@ -11,7 +11,6 @@ app_name="$2"
 dump_file="$3"
 require_application "$username" "$app_name"
 load_app_db_env "$APP_ROOT/.env.db"
-require_postgres_client pg_restore
 
 if [ ! -f "$dump_file" ]; then
   echo "Error: dump file not found: $dump_file"
@@ -20,23 +19,46 @@ fi
 
 dump_file="$(readlink -f "$dump_file")"
 
+if [ "$DB_CONNECTION" = "mysql" ]; then
+  require_mysql_client mysql
+else
+  require_postgres_client pg_restore
+fi
+
 echo "Username: $username"
 echo "Application: $app_name"
 echo "Database: $DB_DATABASE"
+echo "Type: $DB_CONNECTION"
 echo "File: $dump_file"
 confirm_or_exit "WARNING! This will replace the database of $username/$app_name. Do you want to proceed? (y/n): "
 
-PGPASSWORD="$DB_PASSWORD" pg_restore \
-  --host="$DB_HOST" \
-  --port="$DB_PORT" \
-  --username="$DB_USERNAME" \
-  --dbname="$DB_DATABASE" \
-  --no-acl \
-  --no-owner \
-  --if-exists \
-  --clean \
-  --single-transaction \
-  "$dump_file"
+if [ "$DB_CONNECTION" = "mysql" ]; then
+  if mysql_dump_is_gzip "$dump_file"; then
+    gzip -dc "$dump_file" | MYSQL_PWD="$DB_PASSWORD" "$(mysql_cli_bin)" \
+      --host="$DB_HOST" \
+      --port="$DB_PORT" \
+      --user="$DB_USERNAME" \
+      "$DB_DATABASE"
+  else
+    MYSQL_PWD="$DB_PASSWORD" "$(mysql_cli_bin)" \
+      --host="$DB_HOST" \
+      --port="$DB_PORT" \
+      --user="$DB_USERNAME" \
+      "$DB_DATABASE" < "$dump_file"
+  fi
+else
+  PGPASSWORD="$DB_PASSWORD" pg_restore \
+    --host="$DB_HOST" \
+    --port="$DB_PORT" \
+    --username="$DB_USERNAME" \
+    --dbname="$DB_DATABASE" \
+    --no-acl \
+    --no-owner \
+    --if-exists \
+    --clean \
+    --single-transaction \
+    "$dump_file"
+fi
 
 echo
 echo "Database restored from $dump_file"

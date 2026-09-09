@@ -34,6 +34,8 @@ server-tool install npm -y 24
 server-tool install cachetool
 server-tool install mariadb-server
 server-tool install mariadb-client
+server-tool install mysql
+server-tool install mysql-client
 server-tool install postgresql
 server-tool install postgresql -y 17 18
 server-tool install memcached
@@ -46,9 +48,12 @@ server-tool install postgresql redis php 8.4 -y
 server-tool create-user <username> [-p <php-version>] [-y]
 server-tool create-sudo-user <username> [-k <ssh-public-key-or-file>] [--no-password] [-y]
 server-tool delete-user <username> [-y]
-server-tool create-app <username> <application> [-u] [-d <db_name>] [-p <php-version>] [-y]
+server-tool create-app <username> <application> [-u] [-d <db_name>] [-t pgsql|mysql] [-p <php-version>] [-y]
 server-tool create-app testdev demo -u -d mijnapp -p 8.4 -y
+server-tool create-app testdev demo -u -d mijnapp -t mysql -y
+server-tool list-apps
 server-tool delete-app <username> <application> [-y]
+server-tool rename-app <username> <application> <new_name> [--keep-domain] [-y]
 server-tool enable-ssl <username> <application> [-d <domain>] [-e <email>] [--self-signed] [--renew] [-y]
 server-tool enable-basic-auth <username> <application> <auth_user> [-r <realm>] [-y]
 server-tool disable-ssh-password [-y]
@@ -56,7 +61,7 @@ server-tool create-horizon <username> <application> [-p <php-version>] [-n <nump
 server-tool apply-cron <username> <application> [-y]
 server-tool enable-scheduler <username> <application> [-p <php-version>] [-y]
 server-tool disable-scheduler <username> <application> [-y]
-server-tool create-db <db_name> [-y]
+server-tool create-db <db_name> [-t pgsql|mysql] [-y]
 server-tool dump-db <username> <application> [<target-folder>] [-y]
 server-tool restore-db <username> <application> <file> [-y]
 server-tool create-github-runner <url> <token> [-n <name>] [-l <labels>] [-u <username>] [-y]

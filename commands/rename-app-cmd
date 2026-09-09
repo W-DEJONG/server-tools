@@ -1,0 +1,238 @@
+#!/bin/bash
+set -eo pipefail
+
+keep_domain=0
+positionals=()
+usage="Usage: server-tool rename-app <username> <application> <new_name> [--keep-domain] [-y]"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --keep-domain)
+      keep_domain=1
+      shift
+      ;;
+    *)
+      positionals+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ ${#positionals[@]} -ne 3 ]; then
+  echo "$usage"
+  exit 1
+fi
+
+username="${positionals[0]}"
+old_app="${positionals[1]}"
+new_app="${positionals[2]}"
+
+require_application "$username" "$old_app"
+
+case "$new_app" in
+  ""|*/*|.|..|.ssh)
+    echo "Error: invalid application name '$new_app'"
+    exit 1
+    ;;
+esac
+
+if [ "$new_app" = "$old_app" ]; then
+  echo "Error: new application name is the same as the current name."
+  exit 1
+fi
+
+old_root="$APP_ROOT"
+old_nginx_conf="$APP_NGINX_CONF"
+new_root="/home/${username}/${new_app}"
+
+if [ -e "$new_root" ]; then
+  echo "Error: application '$new_app' already exists at $new_root"
+  exit 1
+fi
+
+php_version="$(app_php_version_from_nginx "$old_nginx_conf")"
+if [ -z "$php_version" ]; then
+  echo "Error: could not determine PHP version from $old_nginx_conf"
+  exit 1
+fi
+
+current_server_names="$(app_server_names_from_nginx "$old_nginx_conf")"
+if [ -z "$current_server_names" ]; then
+  current_server_names="$old_app"
+fi
+
+ssl_domain="$(app_server_name_from_nginx "$old_nginx_conf")"
+if [ -z "$ssl_domain" ]; then
+  ssl_domain="$old_app"
+fi
+
+ssl_enabled=0
+if grep -q 'listen 443' "$old_nginx_conf"; then
+  ssl_enabled=1
+fi
+
+server_name=""
+name_is_present() {
+  local needle="$1"
+  local token
+  for token in $2; do
+    if [ "$token" = "$needle" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+append_unique() {
+  local token="$1"
+  if [ -z "$token" ]; then
+    return 0
+  fi
+  if name_is_present "$token" "$server_name"; then
+    return 0
+  fi
+  if [ -n "$server_name" ]; then
+    server_name="${server_name} ${token}"
+  else
+    server_name="$token"
+  fi
+}
+
+if [ "$keep_domain" -eq 1 ]; then
+  server_name="$current_server_names"
+  append_unique "$new_app"
+else
+  for name in $current_server_names; do
+    if [ "$name" = "$old_app" ]; then
+      name="$new_app"
+    fi
+    append_unique "$name"
+  done
+fi
+
+echo "Username: $username"
+echo "Application: $old_app"
+echo "New name: $new_app"
+echo "Server name: $server_name"
+if [ "$keep_domain" -eq 1 ]; then
+  echo "Keep domain: yes"
+fi
+
+confirm_or_exit "This will rename application '$old_app' to '$new_app' for user '$username'. Do you want to proceed? (y/n): "
+
+rewrite_app_refs() {
+  local file="$1"
+  if [ ! -f "$file" ]; then
+    return 0
+  fi
+  sed -i \
+    -e "s|${old_root}|${new_root}|g" \
+    -e "s|horizon-${username}-${old_app}|horizon-${username}-${new_app}|g" \
+    "$file"
+  chown "$username:$username" "$file"
+}
+
+old_hook="/etc/letsencrypt/renewal-hooks/deploy/${username}_${old_app}.sh"
+new_hook="/etc/letsencrypt/renewal-hooks/deploy/${username}_${new_app}.sh"
+hook_tmp=""
+if [ -f "$old_hook" ]; then
+  hook_tmp="$(mktemp)"
+  cp "$old_hook" "$hook_tmp"
+  rm -f "$old_hook"
+fi
+
+remove_app_crontab "$username" "$old_app"
+rm -f "/etc/nginx/conf.d/${username}_${old_app}.conf"
+if [ -d /etc/php ]; then
+  find /etc/php -type f -name "${username}_${old_app}.conf" -exec rm -f {} +
+fi
+rm -f /run/php/php*-fpm-"${username}-${old_app}".sock
+rm -f "/etc/supervisor/conf.d/${username}_${old_app}.d"
+
+echo "Moving $old_root to $new_root"
+mv "$old_root" "$new_root"
+
+if [ -f "$new_root/nginx/${old_app}.conf" ]; then
+  mv "$new_root/nginx/${old_app}.conf" "$new_root/nginx/${new_app}.conf"
+fi
+if [ -f "$new_root/php-fpm/${old_app}.conf" ]; then
+  mv "$new_root/php-fpm/${old_app}.conf" "$new_root/php-fpm/${new_app}.conf"
+fi
+
+cat > "$new_root/php-fpm/${new_app}.conf" <<EOF
+[${username}_${new_app}]
+user = $username
+group = $username
+listen = /run/php/php${php_version}-fpm-${username}-${new_app}.sock
+listen.owner = nginx
+listen.group = nginx
+pm = dynamic
+pm.max_children = 5
+pm.start_servers = 2
+pm.min_spare_servers = 1
+pm.max_spare_servers = 3
+EOF
+chown "$username:$username" "$new_root/php-fpm/${new_app}.conf"
+
+ssl_cert="$new_root/nginx/ssl/${ssl_domain}.pem"
+ssl_key="$new_root/nginx/ssl/${ssl_domain}.key"
+if [ "$ssl_enabled" -eq 1 ]; then
+  render_nginx_app_conf \
+    "$SERVER_TOOL_ROOT/templates/nginx-laravel-ssl.conf" \
+    "$new_root/nginx/${new_app}.conf" \
+    "$username" \
+    "$new_app" \
+    "$new_root" \
+    "$php_version" \
+    "$server_name" \
+    "$ssl_cert" \
+    "$ssl_key"
+else
+  render_nginx_app_conf \
+    "$SERVER_TOOL_ROOT/templates/nginx-laravel.conf" \
+    "$new_root/nginx/${new_app}.conf" \
+    "$username" \
+    "$new_app" \
+    "$new_root" \
+    "$php_version" \
+    "$server_name"
+fi
+chown "$username:$username" "$new_root/nginx/${new_app}.conf"
+
+if [ -d "$new_root/supervisor" ]; then
+  for file in "$new_root/supervisor/"*; do
+    [ -f "$file" ] || continue
+    rewrite_app_refs "$file"
+  done
+fi
+
+if [ -d "$new_root/cron" ]; then
+  for file in "$new_root/cron/"*; do
+    [ -f "$file" ] || continue
+    rewrite_app_refs "$file"
+  done
+fi
+
+if [ -n "$hook_tmp" ] && [ -f "$hook_tmp" ]; then
+  mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+  sed -e "s|${old_root}|${new_root}|g" "$hook_tmp" > "$new_hook"
+  chmod 750 "$new_hook"
+  rm -f "$hook_tmp"
+fi
+
+echo "include $new_root/nginx/*.conf;" > "/etc/nginx/conf.d/${username}_${new_app}.conf"
+mkdir -p "/etc/php/${php_version}/fpm/pool.d"
+echo "include=$new_root/php-fpm/${new_app}.conf" > "/etc/php/${php_version}/fpm/pool.d/${username}_${new_app}.conf"
+
+apply_app_nginx_acl "$username" "$new_root"
+ensure_app_supervisor "$username" "$new_app" "$new_root"
+apply_app_crontab "$username" "$new_app" "$new_root"
+
+php-fpm${php_version} -tt
+systemctl restart php${php_version}-fpm
+reload_nginx
+reload_supervisor
+
+echo
+echo "Application '$old_app' has been renamed to '$new_app'."
+echo "  Root:        $new_root"
+echo "  Server name: $server_name"

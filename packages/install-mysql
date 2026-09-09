@@ -1,0 +1,17 @@
+#!/bin/bash
+set -eo pipefail
+
+# shellcheck disable=SC1091
+source "$SERVER_TOOL_ROOT/lib/common"
+
+refuse_if_mariadb_installed
+confirm_or_exit "This will install and configure MySQL server. Do you want to proceed? (y/n): "
+
+echo "Installing MySQL server..."
+ensure_mysql_repo
+
+export DEBIAN_FRONTEND=noninteractive
+echo "mysql-community-server mysql-community-server/root-pass password " | debconf-set-selections
+echo "mysql-community-server mysql-community-server/re-root-pass password " | debconf-set-selections
+apt install -y mysql-community-server
+systemctl enable --now mysql

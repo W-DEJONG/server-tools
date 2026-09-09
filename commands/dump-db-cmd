@@ -13,7 +13,6 @@ target_folder="${3:-$PWD}"
 
 require_application "$username" "$app_name"
 load_app_db_env "$APP_ROOT/.env.db"
-require_postgres_client pg_dump
 
 if [ ! -d "$target_folder" ]; then
   echo "Error: target folder does not exist: $target_folder"
@@ -21,24 +20,43 @@ if [ ! -d "$target_folder" ]; then
 fi
 
 target_folder="$(readlink -f "$target_folder")"
-dump_file="$target_folder/${app_name}-$(date +%Y%m%d-%H%M%S).dump"
+stamp="$(date +%Y%m%d-%H%M%S)"
+if [ "$DB_CONNECTION" = "mysql" ]; then
+  require_mysql_client mysqldump
+  dump_file="$target_folder/${app_name}-${stamp}.sql.gz"
+else
+  require_postgres_client pg_dump
+  dump_file="$target_folder/${app_name}-${stamp}.dump"
+fi
 
 echo "Username: $username"
 echo "Application: $app_name"
 echo "Database: $DB_DATABASE"
+echo "Type: $DB_CONNECTION"
 echo "Output: $dump_file"
 confirm_or_exit "This will dump the database of $username/$app_name. Do you want to proceed? (y/n): "
 
-PGPASSWORD="$DB_PASSWORD" pg_dump \
-  --host="$DB_HOST" \
-  --port="$DB_PORT" \
-  --username="$DB_USERNAME" \
-  --dbname="$DB_DATABASE" \
-  --clean \
-  --no-acl \
-  --format=custom \
-  --no-owner \
-  --file="$dump_file"
+if [ "$DB_CONNECTION" = "mysql" ]; then
+  MYSQL_PWD="$DB_PASSWORD" "$(mysql_dump_bin)" \
+    --host="$DB_HOST" \
+    --port="$DB_PORT" \
+    --user="$DB_USERNAME" \
+    --single-transaction \
+    --routines \
+    --triggers \
+    "$DB_DATABASE" | gzip -c > "$dump_file"
+else
+  PGPASSWORD="$DB_PASSWORD" pg_dump \
+    --host="$DB_HOST" \
+    --port="$DB_PORT" \
+    --username="$DB_USERNAME" \
+    --dbname="$DB_DATABASE" \
+    --clean \
+    --no-acl \
+    --format=custom \
+    --no-owner \
+    --file="$dump_file"
+fi
 
 chmod 640 "$dump_file"
 

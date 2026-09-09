@@ -98,8 +98,14 @@ grep -q '^KbdInteractiveAuthentication no' /etc/ssh/sshd_config.d/10-server-tool
 grep -q '^PubkeyAuthentication yes' /etc/ssh/sshd_config.d/10-server-tool.conf
 sshd -t
 
-echo "==> create-app testdev demo -d dump_testdb"
-server-tool create-app testdev demo -d dump_testdb -y
+echo "==> create-db without type fails when both engines are installed"
+if server-tool create-db should_fail -y; then
+    echo "Expected create-db without -t to fail when PostgreSQL and MariaDB are both installed"
+    exit 1
+fi
+
+echo "==> create-app testdev demo -d dump_testdb -t pgsql"
+server-tool create-app testdev demo -d dump_testdb -t pgsql -y
 
 echo "==> verify application layout"
 test -d /home/testdev/demo/install/public
@@ -128,7 +134,11 @@ test -d /home/testdev/demo/supervisor
 test -L /etc/supervisor/conf.d/testdev_demo.d
 test -f /home/testdev/demo/nginx/auth.inc
 test -f /home/testdev/demo/.env.db
+grep -q '^DB_CONNECTION=pgsql' /home/testdev/demo/.env.db
 grep -q '^DB_DATABASE=dump_testdb' /home/testdev/demo/.env.db
+
+echo "==> list-apps"
+server-tool list-apps | grep -qxF 'testdev demo'
 
 echo "==> dump-db and restore-db testdev demo"
 db_pass="$(sed -n 's/^DB_PASSWORD=//p' /home/testdev/demo/.env.db | head -1)"
@@ -139,6 +149,32 @@ test -s "$dump_file"
 PGPASSWORD="$db_pass" psql -h 127.0.0.1 -U dump_testdb -d dump_testdb -v ON_ERROR_STOP=1 -c "DROP TABLE smoke;"
 server-tool restore-db testdev demo "$dump_file" -y
 PGPASSWORD="$db_pass" psql -h 127.0.0.1 -U dump_testdb -d dump_testdb -tAc "SELECT id FROM smoke" | grep -qx 1
+
+echo "==> create-db smoke_mysqldb -t mysql"
+server-tool create-db smoke_mysqldb -t mysql -y
+mysql -N -B -e "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'smoke_mysqldb'" | grep -qx 1
+
+echo "==> create-app testdev mysqlapp -d smoke_mysqlapp -t mysql"
+server-tool create-app testdev mysqlapp -d smoke_mysqlapp -t mysql -y
+test -f /home/testdev/mysqlapp/.env.db
+grep -q '^DB_CONNECTION=mysql' /home/testdev/mysqlapp/.env.db
+grep -q '^DB_PORT=3306' /home/testdev/mysqlapp/.env.db
+grep -q '^DB_DATABASE=smoke_mysqlapp' /home/testdev/mysqlapp/.env.db
+
+echo "==> dump-db and restore-db testdev mysqlapp"
+mysql_pass="$(sed -n 's/^DB_PASSWORD=//p' /home/testdev/mysqlapp/.env.db | head -1)"
+MYSQL_PWD="$mysql_pass" mysql -h 127.0.0.1 -u smoke_mysqlapp smoke_mysqlapp -e "CREATE TABLE smoke (id int); INSERT INTO smoke VALUES (1);"
+server-tool dump-db testdev mysqlapp /tmp -y
+mysql_dump_file="$(ls -1t /tmp/mysqlapp-*.sql.gz | head -1)"
+test -s "$mysql_dump_file"
+gzip -t "$mysql_dump_file"
+MYSQL_PWD="$mysql_pass" mysql -h 127.0.0.1 -u smoke_mysqlapp smoke_mysqlapp -e "DROP TABLE smoke;"
+server-tool restore-db testdev mysqlapp "$mysql_dump_file" -y
+MYSQL_PWD="$mysql_pass" mysql -h 127.0.0.1 -N -B -u smoke_mysqlapp smoke_mysqlapp -e "SELECT id FROM smoke" | grep -qx 1
+
+echo "==> delete-app testdev mysqlapp"
+server-tool delete-app testdev mysqlapp -y
+test ! -e /home/testdev/mysqlapp
 
 echo "==> create-horizon testdev demo"
 server-tool create-horizon testdev demo -y
@@ -180,19 +216,49 @@ server-tool apply-cron testdev demo -y
 crontab -u testdev -l | grep -qF "php${php_version} artisan schedule:run"
 crontab -u testdev -l | grep -qF 'artisan extra:job'
 
-echo "==> disable-scheduler testdev demo"
-server-tool disable-scheduler testdev demo -y
-test ! -f /home/testdev/demo/cron/scheduler
-! crontab -u testdev -l | grep -qF 'artisan schedule:run'
-crontab -u testdev -l | grep -qF 'artisan extra:job'
-
-echo "==> delete-app testdev demo"
-server-tool delete-app testdev demo -y
+echo "==> rename-app testdev demo demo2 --keep-domain"
+server-tool rename-app testdev demo demo2 --keep-domain -y
 test ! -e /home/testdev/demo
 test ! -e /etc/nginx/conf.d/testdev_demo.conf
 test ! -e "/etc/php/${php_version}/fpm/pool.d/testdev_demo.conf"
 test ! -e /etc/supervisor/conf.d/testdev_demo.d
 ! grep -qF '# BEGIN server-tool app: testdev/demo' <<< "$(crontab -u testdev -l 2>/dev/null || true)"
+test -d /home/testdev/demo2
+test -f /home/testdev/demo2/nginx/demo2.conf
+test -f /home/testdev/demo2/php-fpm/demo2.conf
+grep -q "php${php_version}-fpm-testdev-demo2.sock" /home/testdev/demo2/nginx/demo2.conf
+grep -q "php${php_version}-fpm-testdev-demo2.sock" /home/testdev/demo2/php-fpm/demo2.conf
+test -f "/etc/php/${php_version}/fpm/pool.d/testdev_demo2.conf"
+test -f /etc/nginx/conf.d/testdev_demo2.conf
+test -L /etc/supervisor/conf.d/testdev_demo2.d
+grep -q "program:horizon-testdev-demo2" /home/testdev/demo2/supervisor/horizon.conf
+grep -q "directory=/home/testdev/demo2/current/" /home/testdev/demo2/supervisor/horizon.conf
+grep -q "cd /home/testdev/demo2/current && php${php_version} artisan schedule:run" /home/testdev/demo2/cron/scheduler
+grep -qF "php /home/testdev/demo2/current/artisan extra:job" /home/testdev/demo2/cron/extra
+crontab -u testdev -l | grep -qF '# BEGIN server-tool app: testdev/demo2'
+crontab -u testdev -l | grep -qF "cd /home/testdev/demo2/current && php${php_version} artisan schedule:run"
+crontab -u testdev -l | grep -qF 'artisan extra:job'
+grep -qE 'server_name[[:space:]]+.*demo\.example\.test' /home/testdev/demo2/nginx/demo2.conf
+grep -qE 'server_name[[:space:]]+.*demo2' /home/testdev/demo2/nginx/demo2.conf
+test -f /home/testdev/demo2/nginx/ssl/demo.example.test.pem
+test -f /home/testdev/demo2/nginx/ssl/demo.example.test.key
+test -f /home/testdev/demo2/.env.db
+grep -q '^DB_DATABASE=dump_testdb' /home/testdev/demo2/.env.db
+grep -q 'auth_basic "Staging"' /home/testdev/demo2/nginx/auth.inc
+
+echo "==> disable-scheduler testdev demo2"
+server-tool disable-scheduler testdev demo2 -y
+test ! -f /home/testdev/demo2/cron/scheduler
+! crontab -u testdev -l | grep -qF 'artisan schedule:run'
+crontab -u testdev -l | grep -qF 'artisan extra:job'
+
+echo "==> delete-app testdev demo2"
+server-tool delete-app testdev demo2 -y
+test ! -e /home/testdev/demo2
+test ! -e /etc/nginx/conf.d/testdev_demo2.conf
+test ! -e "/etc/php/${php_version}/fpm/pool.d/testdev_demo2.conf"
+test ! -e /etc/supervisor/conf.d/testdev_demo2.d
+! grep -qF '# BEGIN server-tool app: testdev/demo2' <<< "$(crontab -u testdev -l 2>/dev/null || true)"
 
 echo "==> verify packages"
 "php${php_version}" -v
