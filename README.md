@@ -69,6 +69,7 @@ server-tool disable-scheduler <username> <application> [-y]
 server-tool create-db <db_name> [-t pgsql|mysql] [--host <host>] [--port <port>] [--admin-user <user>] [--admin-password <password>] [--user-host <mysql-user-host>] [-y]
 server-tool create-db mijnapp -t mysql --host db.internal --admin-user root
 server-tool create-db mijnapp -t pgsql --host db.internal --admin-user postgres
+# omit --admin-password to be prompted (like mysql -p)
 server-tool dump-db <username> <application> [<target-folder>] [-y]
 server-tool restore-db <username> <application> <file> [-y]
 server-tool backup-app <username> <application> [-y]

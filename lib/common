@@ -514,13 +514,11 @@ resolve_remote_db_opts() {
   fi
 
   if [ "${DB_ADMIN_PASSWORD_PROVIDED:-0}" != "1" ]; then
-    if [ "${ASSUME_YES:-0}" = "1" ]; then
-      echo "Error: --admin-password is required when using --host with -y."
+    if [ ! -t 0 ]; then
+      echo "Error: --admin-password is required when stdin is not a terminal."
       exit 1
     fi
-    local prompt_label
-    prompt_label="$(db_type_label)"
-    read -r -s -p "${prompt_label} admin password for ${DB_ADMIN_USER}@${DB_ADMIN_HOST}: " DB_ADMIN_PASSWORD
+    read -r -s -p "Enter password: " DB_ADMIN_PASSWORD
     echo
     DB_ADMIN_PASSWORD_PROVIDED=1
   fi
@@ -685,25 +683,36 @@ mysql_dump_bin() {
   return 1
 }
 
+mysql_write_admin_cnf() {
+  local dest="$1"
+  local escaped="$DB_ADMIN_PASSWORD"
+  escaped="${escaped//\\/\\\\}"
+  escaped="${escaped//\"/\\\"}"
+  cat > "$dest" <<EOF
+[client]
+host=${DB_ADMIN_HOST}
+port=${DB_ADMIN_PORT:-3306}
+user=${DB_ADMIN_USER:-root}
+password="${escaped}"
+protocol=TCP
+EOF
+}
+
 mysql_admin() {
-  local bin
+  local bin tmpcnf rc=0
   bin="$(mysql_cli_bin)" || {
     echo "Error: MySQL/MariaDB client is not installed. Run: server-tool install mysql-client or server-tool install mariadb-client"
     exit 1
   }
   if db_admin_is_remote; then
-    # --no-defaults: ignore ~/.my.cnf / debian.cnf (wrong user/password).
-    # --password=: MYSQL_PWD is ignored by some MariaDB clients.
-    "$bin" --no-defaults \
-      --host="$DB_ADMIN_HOST" \
-      --port="${DB_ADMIN_PORT:-3306}" \
-      --user="${DB_ADMIN_USER:-root}" \
-      --password="${DB_ADMIN_PASSWORD}" \
-      --protocol=TCP \
-      "$@"
-  else
-    "$bin" "$@"
+    tmpcnf="$(mktemp)"
+    chmod 600 "$tmpcnf"
+    mysql_write_admin_cnf "$tmpcnf"
+    "$bin" --defaults-file="$tmpcnf" "$@" || rc=$?
+    rm -f "$tmpcnf"
+    return "$rc"
   fi
+  "$bin" "$@"
 }
 
 create_mysql_database() {
@@ -731,8 +740,16 @@ create_mysql_database() {
     exit 1
   fi
 
+  if db_admin_is_remote; then
+    echo "Connecting to MySQL at ${DB_ADMIN_HOST}:${DB_ADMIN_PORT:-3306} as ${DB_ADMIN_USER}..."
+  fi
   if ! mysql_admin -e "SELECT 1" >/dev/null; then
-    echo "Error: could not connect to MySQL as admin."
+    if db_admin_is_remote; then
+      echo "Error: could not connect to MySQL admin ${DB_ADMIN_USER} at ${DB_ADMIN_HOST}:${DB_ADMIN_PORT:-3306}."
+      echo "MySQL messages like user@'x.x.x.x' show this server's client address, not --host."
+    else
+      echo "Error: could not connect to MySQL as admin."
+    fi
     exit 1
   fi
 

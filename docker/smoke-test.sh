@@ -104,13 +104,13 @@ if server-tool create-db should_fail -y; then
     exit 1
 fi
 
-echo "==> create-db --host without --admin-password fails"
+echo "==> create-db --host without --admin-password fails when stdin is not a terminal"
 if server-tool create-db remote_fail -t pgsql --host 127.0.0.1 -y; then
-    echo "Expected create-db --host without --admin-password to fail"
+    echo "Expected create-db --host without --admin-password to fail without a TTY"
     exit 1
 fi
 if server-tool create-db remote_fail -t mysql --host 127.0.0.1 -y; then
-    echo "Expected create-db --host without --admin-password to fail"
+    echo "Expected create-db --host without --admin-password to fail without a TTY"
     exit 1
 fi
 
@@ -120,13 +120,13 @@ if server-tool create-app testdev nohostapp --host 127.0.0.1 -y; then
     exit 1
 fi
 
-echo "==> create-app --host without --admin-password fails"
+echo "==> create-app --host without --admin-password fails when stdin is not a terminal"
 if server-tool create-app testdev remotefail -d remotefail -t pgsql --host 127.0.0.1 -y; then
-    echo "Expected create-app --host without --admin-password to fail"
+    echo "Expected create-app --host without --admin-password to fail without a TTY"
     exit 1
 fi
 if server-tool create-app testdev remotefail -d remotefail -t mysql --host 127.0.0.1 -y; then
-    echo "Expected create-app --host without --admin-password to fail"
+    echo "Expected create-app --host without --admin-password to fail without a TTY"
     exit 1
 fi
 test ! -e /home/testdev/remotefail
