@@ -162,6 +162,10 @@ zip_excludes=(
   -x "storage/logs/"
   -x "*/storage/logs/*"
   -x "*/storage/logs/"
+  -x "/storage/app/private/livewire-tmp/*"
+  -x "/storage/app/private/livewire-tmp/"
+  -x "*/storage/app/private/livewire-tmp/*"
+  -x "*/storage/app/private/livewire-tmp/"
 )
 if [ -L "$APP_ROOT/current" ]; then
   current_target="$(readlink "$APP_ROOT/current")"
