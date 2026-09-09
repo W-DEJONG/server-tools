@@ -1018,13 +1018,21 @@ deb [signed-by=/usr/share/keyrings/mysql.gpg] https://repo.mysql.com/apt/debian 
 EOF
 }
 
+install_mysql_keyring() {
+  local tmp
+
+  mkdir -p /usr/share/keyrings
+  tmp="$(mktemp)"
+  curl -fsSL https://repo.mysql.com/RPM-GPG-KEY-mysql-2025 | gpg --batch --dearmor > "$tmp"
+  chmod 644 "$tmp"
+  mv "$tmp" /usr/share/keyrings/mysql.gpg
+}
+
 ensure_mysql_repo() {
   local suite
 
   apt-get -y install curl gnupg ca-certificates
-  mkdir -p /usr/share/keyrings
-  curl -fsSL https://repo.mysql.com/RPM-GPG-KEY-mysql-2025 | gpg --dearmor | tee /usr/share/keyrings/mysql.gpg >/dev/null
-  chmod 644 /usr/share/keyrings/mysql.gpg
+  install_mysql_keyring
 
   suite="$(debian_codename)"
   write_mysql_sources_list "$suite"
