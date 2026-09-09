@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 php_version="$(tail -1 "$repo_dir/templates/php-versions")"
+other_php_version="$(tail -2 "$repo_dir/templates/php-versions" | head -1)"
 node_version="$(tail -1 "$repo_dir/templates/node-versions")"
 postgres_version="$(tail -1 "$repo_dir/templates/postgresql-versions")"
 
@@ -286,6 +287,30 @@ test -f /home/testdev/demo2/.env.db
 grep -q '^DB_DATABASE=dump_testdb' /home/testdev/demo2/.env.db
 grep -q 'auth_basic "Staging"' /home/testdev/demo2/nginx/auth.inc
 
+echo "==> switch-php testdev demo2 ${other_php_version}"
+if server-tool switch-php testdev demo2 -p "$php_version" -y; then
+    echo "Expected switch-php to the current version to fail"
+    exit 1
+fi
+server-tool switch-php testdev demo2 -p "$other_php_version" -y
+grep -q "php${other_php_version}-fpm-testdev-demo2.sock" /home/testdev/demo2/nginx/demo2.conf
+grep -q "php${other_php_version}-fpm-testdev-demo2.sock" /home/testdev/demo2/php-fpm/demo2.conf
+test ! -e "/etc/php/${php_version}/fpm/pool.d/testdev_demo2.conf"
+test -f "/etc/php/${other_php_version}/fpm/pool.d/testdev_demo2.conf"
+grep -q "include=/home/testdev/demo2/php-fpm/demo2.conf" "/etc/php/${other_php_version}/fpm/pool.d/testdev_demo2.conf"
+grep -q "php${other_php_version} artisan horizon" /home/testdev/demo2/supervisor/horizon.conf
+grep -q "php${other_php_version} artisan queue:work --sleep=3 --tries=3 --timeout=60 --max-time=3600" /home/testdev/demo2/supervisor/queue.conf
+grep -q "cd /home/testdev/demo2/current && php${other_php_version} artisan schedule:run" /home/testdev/demo2/cron/scheduler
+grep -qF "php /home/testdev/demo2/current/artisan extra:job" /home/testdev/demo2/cron/extra
+crontab -u testdev -l | grep -qF "cd /home/testdev/demo2/current && php${other_php_version} artisan schedule:run"
+crontab -u testdev -l | grep -qF 'artisan extra:job'
+grep -qE 'server_name[[:space:]]+.*demo\.example\.test' /home/testdev/demo2/nginx/demo2.conf
+grep -qE 'server_name[[:space:]]+.*demo2' /home/testdev/demo2/nginx/demo2.conf
+grep -q "listen 443 ssl" /home/testdev/demo2/nginx/demo2.conf
+test -f /home/testdev/demo2/nginx/ssl/demo.example.test.pem
+test -f /home/testdev/demo2/nginx/ssl/demo.example.test.key
+grep -q 'auth_basic "Staging"' /home/testdev/demo2/nginx/auth.inc
+
 echo "==> disable-scheduler testdev demo2"
 server-tool disable-scheduler testdev demo2 -y
 test ! -f /home/testdev/demo2/cron/scheduler
@@ -297,6 +322,7 @@ server-tool delete-app testdev demo2 -y
 test ! -e /home/testdev/demo2
 test ! -e /etc/nginx/conf.d/testdev_demo2.conf
 test ! -e "/etc/php/${php_version}/fpm/pool.d/testdev_demo2.conf"
+test ! -e "/etc/php/${other_php_version}/fpm/pool.d/testdev_demo2.conf"
 test ! -e /etc/supervisor/conf.d/testdev_demo2.d
 ! grep -qF '# BEGIN server-tool app: testdev/demo2' <<< "$(crontab -u testdev -l 2>/dev/null || true)"
 

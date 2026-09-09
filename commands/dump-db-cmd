@@ -33,14 +33,13 @@ echo "Username: $username"
 echo "Application: $app_name"
 echo "Database: $DB_DATABASE"
 echo "Type: $DB_CONNECTION"
+echo "Host: $DB_HOST"
+echo "Port: $DB_PORT"
 echo "Output: $dump_file"
 confirm_or_exit "This will dump the database of $username/$app_name. Do you want to proceed? (y/n): "
 
 if [ "$DB_CONNECTION" = "mysql" ]; then
-  MYSQL_PWD="$DB_PASSWORD" "$(mysql_dump_bin)" \
-    --host="$DB_HOST" \
-    --port="$DB_PORT" \
-    --user="$DB_USERNAME" \
+  mysql_with_app_cnf "$(mysql_dump_bin)" \
     --single-transaction \
     --routines \
     --triggers \

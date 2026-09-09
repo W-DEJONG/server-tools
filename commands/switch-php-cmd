@@ -1,0 +1,127 @@
+#!/bin/bash
+set -eo pipefail
+
+php_version=""
+positionals=()
+usage="Usage: server-tool switch-php <username> <application> [-p <php-version>] [-y]"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -p|--php)
+      if [ -z "${2:-}" ]; then
+        echo "Error: -p requires a PHP version"
+        echo "$usage"
+        exit 1
+      fi
+      php_version="$2"
+      shift 2
+      ;;
+    *)
+      positionals+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ ${#positionals[@]} -ne 2 ]; then
+  echo "$usage"
+  exit 1
+fi
+
+username="${positionals[0]}"
+app_name="${positionals[1]}"
+require_application "$username" "$app_name"
+
+old_php_version="$(app_php_version_from_nginx "$APP_NGINX_CONF")"
+if [ -z "$old_php_version" ]; then
+  echo "Error: could not determine PHP version from $APP_NGINX_CONF"
+  exit 1
+fi
+
+if [ -n "$php_version" ]; then
+  resolve_versions "$SERVER_TOOL_ROOT/templates/php-versions" \
+    'Which PHP version should this application use? ' \
+    0 \
+    "$php_version"
+else
+  resolve_versions "$SERVER_TOOL_ROOT/templates/php-versions" \
+    'Which PHP version should this application use? ' \
+    0
+fi
+php_version="$SELECTED_VERSION"
+
+if [ "$php_version" = "$old_php_version" ]; then
+  echo "Error: application '$app_name' already uses PHP ${php_version}."
+  exit 1
+fi
+
+if ! grep -q "php${old_php_version}-fpm-" "$APP_NGINX_CONF"; then
+  echo "Error: could not find PHP ${old_php_version} socket in $APP_NGINX_CONF"
+  exit 1
+fi
+
+echo "Username: $username"
+echo "Application: $app_name"
+echo "Current PHP version: $old_php_version"
+echo "New PHP version: $php_version"
+confirm_or_exit "This will switch application '$app_name' from PHP ${old_php_version} to PHP ${php_version}. Do you want to proceed? (y/n): "
+
+ensure_php_fpm "$php_version"
+
+rewrite_php_version_refs() {
+  local file="$1"
+  local from="$2"
+  local to="$3"
+  if [ ! -f "$file" ]; then
+    return 0
+  fi
+  sed -i -e "s|php${from}|php${to}|g" "$file"
+  chown "$username:$username" "$file"
+}
+
+rewrite_php_socket() {
+  local file="$1"
+  if [ ! -f "$file" ]; then
+    return 0
+  fi
+  sed -i -e "s|php${old_php_version}-fpm-|php${php_version}-fpm-|g" "$file"
+  chown "$username:$username" "$file"
+}
+
+rewrite_php_socket "$APP_NGINX_CONF"
+rewrite_php_socket "$APP_ROOT/php-fpm/${app_name}.conf"
+
+if [ -d "$APP_ROOT/supervisor" ]; then
+  for file in "$APP_ROOT/supervisor/"*; do
+    [ -f "$file" ] || continue
+    rewrite_php_version_refs "$file" "$old_php_version" "$php_version"
+  done
+fi
+
+if [ -d "$APP_ROOT/cron" ]; then
+  for file in "$APP_ROOT/cron/"*; do
+    [ -f "$file" ] || continue
+    rewrite_php_version_refs "$file" "$old_php_version" "$php_version"
+  done
+fi
+
+if [ -d /etc/php ]; then
+  find /etc/php -type f -name "${username}_${app_name}.conf" -exec rm -f {} +
+fi
+mkdir -p "/etc/php/${php_version}/fpm/pool.d"
+echo "include=$APP_ROOT/php-fpm/${app_name}.conf" > "/etc/php/${php_version}/fpm/pool.d/${username}_${app_name}.conf"
+
+rm -f "/run/php/php${old_php_version}-fpm-${username}-${app_name}.sock"
+
+php-fpm${php_version} -tt
+systemctl restart "php${php_version}-fpm"
+if systemctl is-active --quiet "php${old_php_version}-fpm"; then
+  systemctl restart "php${old_php_version}-fpm"
+fi
+reload_nginx
+reload_supervisor
+apply_app_crontab "$username" "$app_name" "$APP_ROOT"
+
+echo
+echo "Application '$app_name' now uses PHP ${php_version}."
+echo "  Previous: PHP ${old_php_version}"
+echo "  Socket:   /run/php/php${php_version}-fpm-${username}-${app_name}.sock"

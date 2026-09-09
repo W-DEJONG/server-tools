@@ -683,19 +683,39 @@ mysql_dump_bin() {
   return 1
 }
 
-mysql_write_admin_cnf() {
+mysql_write_client_cnf() {
   local dest="$1"
-  local escaped="$DB_ADMIN_PASSWORD"
+  local host="$2"
+  local port="$3"
+  local user="$4"
+  local password="$5"
+  local escaped="$password"
   escaped="${escaped//\\/\\\\}"
   escaped="${escaped//\"/\\\"}"
   cat > "$dest" <<EOF
 [client]
-host=${DB_ADMIN_HOST}
-port=${DB_ADMIN_PORT:-3306}
-user=${DB_ADMIN_USER:-root}
+host=${host}
+port=${port}
+user=${user}
 password="${escaped}"
 protocol=TCP
 EOF
+}
+
+mysql_write_admin_cnf() {
+  mysql_write_client_cnf "$1" "$DB_ADMIN_HOST" "${DB_ADMIN_PORT:-3306}" "${DB_ADMIN_USER:-root}" "$DB_ADMIN_PASSWORD"
+}
+
+mysql_with_app_cnf() {
+  local bin="$1"
+  shift
+  local tmpcnf rc=0
+  tmpcnf="$(mktemp)"
+  chmod 600 "$tmpcnf"
+  mysql_write_client_cnf "$tmpcnf" "$DB_HOST" "${DB_PORT:-3306}" "$DB_USERNAME" "$DB_PASSWORD"
+  "$bin" --defaults-file="$tmpcnf" "$@" || rc=$?
+  rm -f "$tmpcnf"
+  return "$rc"
 }
 
 mysql_admin() {

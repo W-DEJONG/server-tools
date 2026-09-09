@@ -58,6 +58,7 @@ server-tool create-app testdev demo -d mijnapp -t pgsql --host db.internal --adm
 server-tool list-apps
 server-tool delete-app <username> <application> [-y]
 server-tool rename-app <username> <application> <new_name> [--keep-domain] [-y]
+server-tool switch-php <username> <application> [-p <php-version>] [-y]
 server-tool enable-ssl <username> <application> [-d <domain>] [-e <email>] [--self-signed] [--renew] [-y]
 server-tool enable-basic-auth <username> <application> <auth_user> [-r <realm>] [-y]
 server-tool disable-ssh-password [-y]
