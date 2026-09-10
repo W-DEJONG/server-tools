@@ -11,7 +11,7 @@ is_package() {
 
 package_accepts_args() {
   case "$1" in
-    php|npm|postgresql|aws) return 0 ;;
+    php|npm|postgresql|aws|composer) return 0 ;;
     *) return 1 ;;
   esac
 }

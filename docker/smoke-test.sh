@@ -42,6 +42,15 @@ server-tool install npm -y "$node_version"
 echo "==> install cachetool"
 server-tool install cachetool -y
 
+echo "==> install composer --version 2.8.12"
+server-tool install composer --version 2.8.12 -y
+test -x /usr/local/bin/composer
+composer --version --no-ansi | grep -q 2.8.12
+echo "==> install composer (latest)"
+server-tool install composer -y
+test -x /usr/local/bin/composer
+composer --version --no-ansi
+
 echo "==> install memcached"
 server-tool install memcached -y
 
@@ -441,5 +450,7 @@ nginx -v
 psql --version
 redis-cli ping
 test -x /usr/local/bin/cachetool
+test -x /usr/local/bin/composer
+composer --version --no-ansi
 
 echo "==> smoke test passed"

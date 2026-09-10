@@ -32,6 +32,9 @@ server-tool install php -y 8.4 8.5
 server-tool install npm
 server-tool install npm -y 24
 server-tool install cachetool
+server-tool install composer
+server-tool install composer --version 2.8.12
+server-tool install composer -y
 server-tool install mariadb-server
 server-tool install mariadb-client
 server-tool install mysql

@@ -1,0 +1,102 @@
+#!/bin/bash
+set -eo pipefail
+
+# shellcheck disable=SC1091
+source "$SERVER_TOOL_ROOT/lib/common"
+
+composer_version=""
+usage="Usage: server-tool install composer [--version <version>] [-y]"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --version)
+      if [ -z "${2:-}" ]; then
+        echo "Error: --version requires a Composer version"
+        echo "$usage"
+        exit 1
+      fi
+      composer_version="$2"
+      shift 2
+      ;;
+    *)
+      echo "Error: unknown argument '$1'."
+      echo "$usage"
+      exit 1
+      ;;
+  esac
+done
+
+already_installed=0
+if [ -x /usr/local/bin/composer ]; then
+  already_installed=1
+fi
+
+if [ "$already_installed" -eq 1 ]; then
+  if [ -n "$composer_version" ]; then
+    confirm_or_exit "This will update Composer to ${composer_version}. Do you want to proceed? (y/n): "
+  else
+    confirm_or_exit "This will update Composer to the latest version. Do you want to proceed? (y/n): "
+  fi
+elif [ -n "$composer_version" ]; then
+  confirm_or_exit "This will install Composer ${composer_version}. Do you want to proceed? (y/n): "
+else
+  confirm_or_exit "This will install the latest Composer. Do you want to proceed? (y/n): "
+fi
+
+php_bin=""
+if command -v php >/dev/null 2>&1; then
+  php_bin="$(command -v php)"
+else
+  while IFS= read -r version; do
+    [ -n "$version" ] || continue
+    if command -v "php${version}" >/dev/null 2>&1; then
+      php_bin="$(command -v "php${version}")"
+    fi
+  done < "$SERVER_TOOL_ROOT/templates/php-versions"
+fi
+
+if [ -z "$php_bin" ]; then
+  echo "Error: PHP CLI is required to install Composer. Run: server-tool install php"
+  exit 1
+fi
+
+if [ "$already_installed" -eq 1 ]; then
+  if [ -n "$composer_version" ]; then
+    echo "Updating Composer to ${composer_version}..."
+  else
+    echo "Updating Composer to the latest version..."
+  fi
+else
+  if [ -n "$composer_version" ]; then
+    echo "Installing Composer ${composer_version}..."
+  else
+    echo "Installing the latest Composer..."
+  fi
+fi
+
+workdir="$(mktemp -d)"
+cleanup_installer() {
+  rm -rf "$workdir"
+}
+trap cleanup_installer EXIT
+
+(
+  cd "$workdir"
+  expected_checksum="$("$php_bin" -r 'copy("https://composer.github.io/installer.sig", "php://stdout");')"
+  "$php_bin" -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
+  actual_checksum="$("$php_bin" -r "echo hash_file('sha384', 'composer-setup.php');")"
+
+  if [ "$expected_checksum" != "$actual_checksum" ]; then
+    echo "Error: invalid Composer installer checksum."
+    exit 1
+  fi
+
+  installer_args=(--install-dir=/usr/local/bin --filename=composer)
+  if [ -n "$composer_version" ]; then
+    installer_args+=(--version="$composer_version")
+  fi
+
+  "$php_bin" composer-setup.php "${installer_args[@]}"
+)
+
+chmod +x /usr/local/bin/composer
+/usr/local/bin/composer --version --no-ansi
