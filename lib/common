@@ -163,6 +163,15 @@ reload_nginx() {
   nginx -s reload
 }
 
+auth_basic_var_name() {
+  local username="$1"
+  local app_name="$2"
+  local raw
+
+  raw="$(printf '%s' "${username}_${app_name}" | tr -c 'A-Za-z0-9' '_')"
+  printf 'auth_basic_%s\n' "$raw"
+}
+
 read_versions_from_file() {
   local file="$1"
   local line
@@ -1211,37 +1220,238 @@ ensure_sury_php_repo() {
   apt-get update
 }
 
-ensure_nodesource_repo() {
-  local node_major="$1"
-  local arch
+NODEJS_ROOT="/usr/local/lib/nodejs"
 
+nodejs_is_installed() {
+  local major="$1"
+  [ -x "$NODEJS_ROOT/$major/bin/node" ]
+}
+
+nodejs_platform() {
+  local arch
   arch="$(debian_arch)"
-  if [ "$arch" != "amd64" ] && [ "$arch" != "arm64" ]; then
-    echo "Error: NodeSource only supports amd64 and arm64. Detected: $arch"
+  case "$arch" in
+    amd64)
+      printf '%s\n' "linux-x64"
+      ;;
+    arm64)
+      printf '%s\n' "linux-arm64"
+      ;;
+    *)
+      echo "Error: Node.js binaries are only available for amd64 and arm64. Detected: $arch"
+      exit 1
+      ;;
+  esac
+}
+
+installed_nodejs_majors() {
+  local d name
+  if [ ! -d "$NODEJS_ROOT" ]; then
+    return 0
+  fi
+
+  for d in "$NODEJS_ROOT"/*; do
+    [ -e "$d" ] || continue
+    name="$(basename "$d")"
+    [ "$name" = "default" ] && continue
+    if [ -x "$d/bin/node" ]; then
+      printf '%s\n' "$name"
+    fi
+  done | sort -n
+}
+
+list_installed_nodejs_majors() {
+  local majors
+  majors="$(installed_nodejs_majors | tr '\n' ' ')"
+  majors="${majors% }"
+  if [ -z "$majors" ]; then
+    printf '%s\n' "(none)"
+  else
+    printf '%s\n' "$majors"
+  fi
+}
+
+remove_nodesource_nodejs() {
+  if package_is_installed nodejs; then
+    echo "Removing apt nodejs so versioned Node.js installs can take over..."
+    apt-get remove -y nodejs
+  fi
+
+  rm -f /etc/apt/sources.list.d/nodesource.sources
+  rm -f /etc/apt/sources.list.d/nodesource.list
+  rm -f /etc/apt/preferences.d/nodejs
+  rm -f /usr/share/keyrings/nodesource.gpg
+}
+
+install_nodejs_version() {
+  local major="$1"
+  local platform tarball expected actual tmpdir base_url
+
+  if nodejs_is_installed "$major"; then
+    echo "Node.js $major is already installed."
+    return 0
+  fi
+
+  platform="$(nodejs_platform)"
+  apt-get update
+  apt-get -y install ca-certificates curl xz-utils
+
+  base_url="https://nodejs.org/dist/latest-v${major}.x"
+  tmpdir="$(mktemp -d)"
+  curl -fsSL -o "$tmpdir/SHASUMS256.txt" "${base_url}/SHASUMS256.txt"
+  tarball="$(awk -v p="$platform" '
+    $2 ~ ("^node-v[0-9.]+-" p "[.]tar[.]xz$") { print $2; exit }
+  ' "$tmpdir/SHASUMS256.txt")"
+
+  if [ -z "$tarball" ]; then
+    rm -rf "$tmpdir"
+    echo "Error: could not find a Node.js $major tarball for $platform."
     exit 1
   fi
 
-  apt-get -y install ca-certificates curl gnupg
-  mkdir -p /usr/share/keyrings
-  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor | tee /usr/share/keyrings/nodesource.gpg >/dev/null
-  chmod 644 /usr/share/keyrings/nodesource.gpg
+  expected="$(awk -v t="$tarball" '$2 == t { print $1; exit }' "$tmpdir/SHASUMS256.txt")"
+  if [ -z "$expected" ]; then
+    rm -rf "$tmpdir"
+    echo "Error: could not find checksum for $tarball."
+    exit 1
+  fi
 
-  cat > /etc/apt/sources.list.d/nodesource.sources <<EOF
-Types: deb
-URIs: https://deb.nodesource.com/node_${node_major}.x
-Suites: nodistro
-Components: main
-Architectures: ${arch}
-Signed-By: /usr/share/keyrings/nodesource.gpg
-EOF
+  echo "Downloading $tarball..."
+  curl -fsSL -o "$tmpdir/$tarball" "${base_url}/${tarball}"
+  actual="$(sha256sum "$tmpdir/$tarball" | awk '{print $1}')"
+  if [ "$actual" != "$expected" ]; then
+    rm -rf "$tmpdir"
+    echo "Error: checksum mismatch for $tarball."
+    exit 1
+  fi
 
-  cat > /etc/apt/preferences.d/nodejs <<EOF
-Package: nodejs
-Pin: origin deb.nodesource.com
-Pin-Priority: 600
-EOF
+  mkdir -p "$tmpdir/extract"
+  tar -xJf "$tmpdir/$tarball" --strip-components=1 -C "$tmpdir/extract"
+  mkdir -p "$NODEJS_ROOT"
+  rm -rf "${NODEJS_ROOT:?}/$major"
+  mv "$tmpdir/extract" "$NODEJS_ROOT/$major"
+  rm -rf "$tmpdir"
 
-  apt-get update
+  echo "Installed Node.js $major ($tarball)."
+}
+
+update_nodejs_default_symlink() {
+  local best="" v
+
+  read_versions_from_file "$SERVER_TOOL_ROOT/templates/node-versions"
+  for v in "${ALLOWED_VERSIONS[@]}"; do
+    if nodejs_is_installed "$v"; then
+      if [ -z "$best" ] || [ "$v" -gt "$best" ]; then
+        best="$v"
+      fi
+    fi
+  done
+
+  if [ -z "$best" ]; then
+    echo "Error: no Node.js versions are installed."
+    exit 1
+  fi
+
+  mkdir -p "$NODEJS_ROOT"
+  ln -sfn "$best" "$NODEJS_ROOT/default"
+}
+
+ensure_node_wrappers() {
+  mkdir -p /usr/local/bin
+  chmod +x "$SERVER_TOOL_ROOT/bin/node-cmd"
+  ln -sfn "$SERVER_TOOL_ROOT/bin/node-cmd" /usr/local/bin/node
+  ln -sfn "$SERVER_TOOL_ROOT/bin/node-cmd" /usr/local/bin/npm
+  ln -sfn "$SERVER_TOOL_ROOT/bin/node-cmd" /usr/local/bin/npx
+}
+
+find_nvmrc() {
+  local dir="$PWD"
+
+  while true; do
+    if [ -f "$dir/.nvmrc" ]; then
+      printf '%s\n' "$dir/.nvmrc"
+      return 0
+    fi
+    if [ "$dir" = "/" ]; then
+      break
+    fi
+    dir="$(dirname "$dir")"
+  done
+
+  return 1
+}
+
+parse_nvmrc_major() {
+  local file="$1"
+  local line
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    [ -n "$line" ] || continue
+    line="${line#v}"
+    line="${line#V}"
+    if [[ "$line" =~ ^([0-9]+)([.][0-9]+)*$ ]]; then
+      printf '%s\n' "${BASH_REMATCH[1]}"
+      return 0
+    fi
+    echo "Error: invalid .nvmrc value '$line' in $file" >&2
+    echo "Expected a Node.js major version such as 22 or 22.14.0." >&2
+    exit 1
+  done < "$file"
+
+  echo "Error: .nvmrc is empty: $file" >&2
+  exit 1
+}
+
+resolve_active_node_version() {
+  local nvmrc major
+
+  if nvmrc="$(find_nvmrc)"; then
+    major="$(parse_nvmrc_major "$nvmrc")"
+    if ! nodejs_is_installed "$major"; then
+      echo "Error: Node.js $major from $nvmrc is not installed." >&2
+      echo "Installed versions: $(list_installed_nodejs_majors)" >&2
+      echo "Run: server-tool install npm -y $major" >&2
+      exit 1
+    fi
+    printf '%s\n' "$major"
+    return 0
+  fi
+
+  if [ -e "$NODEJS_ROOT/default/bin/node" ]; then
+    major="$(basename "$(readlink -f "$NODEJS_ROOT/default")")"
+    printf '%s\n' "$major"
+    return 0
+  fi
+
+  echo "Error: Node.js is not installed. Run: server-tool install npm" >&2
+  exit 1
+}
+
+exec_nodejs() {
+  local cmd="$1"
+  shift
+  local version root
+
+  version="$(resolve_active_node_version)"
+  root="$NODEJS_ROOT/$version"
+
+  case "$cmd" in
+    node)
+      exec "$root/bin/node" "$@"
+      ;;
+    npm)
+      exec "$root/bin/node" "$root/lib/node_modules/npm/bin/npm-cli.js" "$@"
+      ;;
+    npx)
+      exec "$root/bin/node" "$root/lib/node_modules/npm/bin/npx-cli.js" "$@"
+      ;;
+    *)
+      echo "Error: unknown Node.js command '$cmd'" >&2
+      exit 1
+      ;;
+  esac
 }
 
 ensure_pgdg_repo() {

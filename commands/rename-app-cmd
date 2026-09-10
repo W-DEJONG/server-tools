@@ -220,6 +220,18 @@ if [ -n "$hook_tmp" ] && [ -f "$hook_tmp" ]; then
   rm -f "$hook_tmp"
 fi
 
+old_auth_var="$(auth_basic_var_name "$username" "$old_app")"
+new_auth_var="$(auth_basic_var_name "$username" "$new_app")"
+for file in "$new_root/nginx/auth.inc" "$new_root/nginx/auth-map.conf"; do
+  if [ -f "$file" ]; then
+    sed -i \
+      -e "s|${old_root}|${new_root}|g" \
+      -e "s|${old_auth_var}|${new_auth_var}|g" \
+      "$file"
+    chown "$username:$username" "$file"
+  fi
+done
+
 echo "include $new_root/nginx/*.conf;" > "/etc/nginx/conf.d/${username}_${new_app}.conf"
 mkdir -p "/etc/php/${php_version}/fpm/pool.d"
 echo "include=$new_root/php-fpm/${new_app}.conf" > "/etc/php/${php_version}/fpm/pool.d/${username}_${new_app}.conf"

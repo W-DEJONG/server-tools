@@ -31,6 +31,8 @@ server-tool install php
 server-tool install php -y 8.4 8.5
 server-tool install npm
 server-tool install npm -y 24
+server-tool install npm -y 22 24
+# node/npm/npx follow .nvmrc (major); without it, the highest installed LTS is used
 server-tool install cachetool
 server-tool install composer
 server-tool install composer --version 2.8.12
@@ -63,7 +65,8 @@ server-tool delete-app <username> <application> [-y]
 server-tool rename-app <username> <application> <new_name> [--keep-domain] [-y]
 server-tool switch-php <username> <application> [-p <php-version>] [-y]
 server-tool enable-ssl <username> <application> [-d <domain>] [-e <email>] [--self-signed] [--renew] [-y]
-server-tool enable-basic-auth <username> <application> <auth_user> [-r <realm>] [-y]
+server-tool enable-basic-auth <username> <application> <auth_user> [-r <realm>] [--except <path>] [-y]
+server-tool enable-basic-auth testdev demo tester -r Staging --except /webhooks --except /up -y
 server-tool disable-ssh-password [-y]
 server-tool create-horizon <username> <application> [-p <php-version>] [-n <numprocs>] [-y]
 server-tool create-queue <username> <application> [-p <php-version>] [-n <numprocs>] [-q <queue>] [-c <connection>] [--tries <n>] [--timeout <seconds>] [--sleep <seconds>] [-y]

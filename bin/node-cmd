@@ -1,0 +1,17 @@
+#!/bin/bash
+set -eo pipefail
+
+SERVER_TOOL_ROOT="$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")"
+# shellcheck disable=SC1091
+source "$SERVER_TOOL_ROOT/lib/common"
+
+cmd="$(basename "$0")"
+case "$cmd" in
+  node|npm|npx)
+    exec_nodejs "$cmd" "$@"
+    ;;
+  *)
+    echo "Error: node-cmd invoked as '$cmd'" >&2
+    exit 1
+    ;;
+esac

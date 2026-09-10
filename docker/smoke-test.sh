@@ -5,6 +5,7 @@ repo_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 php_version="$(tail -1 "$repo_dir/templates/php-versions")"
 other_php_version="$(tail -2 "$repo_dir/templates/php-versions" | head -1)"
 node_version="$(tail -1 "$repo_dir/templates/node-versions")"
+other_node_version="$(tail -2 "$repo_dir/templates/node-versions" | head -1)"
 postgres_version="$(tail -1 "$repo_dir/templates/postgresql-versions")"
 
 if [ "${EUID}" -ne 0 ]; then
@@ -36,8 +37,35 @@ server-tool install nginx -y
 echo "==> install php ${php_version}"
 server-tool install php -y "$php_version"
 
-echo "==> install npm ${node_version}"
-server-tool install npm -y "$node_version"
+echo "==> install npm ${other_node_version} ${node_version}"
+server-tool install npm -y "$other_node_version" "$node_version"
+
+echo "==> node wrappers follow .nvmrc"
+node_default="$(cd /tmp && node -v)"
+[[ "$node_default" == v${node_version}.* ]]
+(cd /tmp && npm -v)
+
+node_nvmrc_dir="$(mktemp -d)"
+echo "$other_node_version" > "$node_nvmrc_dir/.nvmrc"
+other_node_out="$(cd "$node_nvmrc_dir" && node -v)"
+[[ "$other_node_out" == v${other_node_version}.* ]]
+(cd "$node_nvmrc_dir" && npm -v)
+
+echo "$node_version" > "$node_nvmrc_dir/.nvmrc"
+default_node_out="$(cd "$node_nvmrc_dir" && node -v)"
+[[ "$default_node_out" == v${node_version}.* ]]
+
+mkdir -p "$node_nvmrc_dir/child/nested"
+echo "$other_node_version" > "$node_nvmrc_dir/.nvmrc"
+walkup_node_out="$(cd "$node_nvmrc_dir/child/nested" && node -v)"
+[[ "$walkup_node_out" == v${other_node_version}.* ]]
+
+echo "20" > "$node_nvmrc_dir/.nvmrc"
+if (cd "$node_nvmrc_dir" && node -v); then
+    echo "Expected node to fail for missing major 20"
+    exit 1
+fi
+rm -rf "$node_nvmrc_dir"
 
 echo "==> install cachetool"
 server-tool install cachetool -y
@@ -233,7 +261,24 @@ grep -q "stopwaitsecs=3600" /home/testdev/demo/supervisor/queue.conf
 echo "==> enable-basic-auth testdev demo tester"
 server-tool enable-basic-auth testdev demo tester -r Staging -y
 grep -q 'auth_basic "Staging"' /home/testdev/demo/nginx/auth.inc
+test ! -e /home/testdev/demo/nginx/auth-map.conf
 test -s /home/testdev/demo/nginx/.htpasswd
+
+echo "==> enable-basic-auth testdev demo tester --except"
+server-tool enable-basic-auth testdev demo tester -r Staging --except /webhooks --except /up -y
+grep -q 'auth_basic $auth_basic_testdev_demo' /home/testdev/demo/nginx/auth.inc
+grep -q 'default "Staging"' /home/testdev/demo/nginx/auth-map.conf
+grep -qF '~^/webhooks(/|\?|$)' /home/testdev/demo/nginx/auth-map.conf
+grep -qF '~^/up(/|\?|$)' /home/testdev/demo/nginx/auth-map.conf
+grep -qxF '/webhooks' /home/testdev/demo/nginx/auth-except
+grep -qxF '/up' /home/testdev/demo/nginx/auth-except
+
+echo "==> enable-basic-auth keeps excepts without --except"
+server-tool enable-basic-auth testdev demo tester -r Staging -y
+grep -q 'auth_basic $auth_basic_testdev_demo' /home/testdev/demo/nginx/auth.inc
+grep -qF '~^/webhooks(/|\?|$)' /home/testdev/demo/nginx/auth-map.conf
+grep -qxF '/webhooks' /home/testdev/demo/nginx/auth-except
+grep -qxF '/up' /home/testdev/demo/nginx/auth-except
 
 echo "==> enable-ssl testdev demo --self-signed"
 server-tool enable-ssl testdev demo -d demo.example.test --self-signed -y
@@ -294,7 +339,11 @@ test -f /home/testdev/demo2/nginx/ssl/demo.example.test.pem
 test -f /home/testdev/demo2/nginx/ssl/demo.example.test.key
 test -f /home/testdev/demo2/.env.db
 grep -q '^DB_DATABASE=dump_testdb' /home/testdev/demo2/.env.db
-grep -q 'auth_basic "Staging"' /home/testdev/demo2/nginx/auth.inc
+grep -q 'auth_basic $auth_basic_testdev_demo2' /home/testdev/demo2/nginx/auth.inc
+grep -q '/home/testdev/demo2/nginx/.htpasswd' /home/testdev/demo2/nginx/auth.inc
+grep -q 'default "Staging"' /home/testdev/demo2/nginx/auth-map.conf
+grep -qF '~^/webhooks(/|\?|$)' /home/testdev/demo2/nginx/auth-map.conf
+grep -qF '~^/up(/|\?|$)' /home/testdev/demo2/nginx/auth-map.conf
 
 echo "==> switch-php testdev demo2 ${other_php_version}"
 if server-tool switch-php testdev demo2 -p "$php_version" -y; then
@@ -318,7 +367,11 @@ grep -qE 'server_name[[:space:]]+.*demo2' /home/testdev/demo2/nginx/demo2.conf
 grep -q "listen 443 ssl" /home/testdev/demo2/nginx/demo2.conf
 test -f /home/testdev/demo2/nginx/ssl/demo.example.test.pem
 test -f /home/testdev/demo2/nginx/ssl/demo.example.test.key
-grep -q 'auth_basic "Staging"' /home/testdev/demo2/nginx/auth.inc
+grep -q 'auth_basic $auth_basic_testdev_demo2' /home/testdev/demo2/nginx/auth.inc
+grep -q '/home/testdev/demo2/nginx/.htpasswd' /home/testdev/demo2/nginx/auth.inc
+grep -q 'default "Staging"' /home/testdev/demo2/nginx/auth-map.conf
+grep -qF '~^/webhooks(/|\?|$)' /home/testdev/demo2/nginx/auth-map.conf
+grep -qF '~^/up(/|\?|$)' /home/testdev/demo2/nginx/auth-map.conf
 
 echo "==> disable-scheduler testdev demo2"
 server-tool disable-scheduler testdev demo2 -y

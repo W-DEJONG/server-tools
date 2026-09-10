@@ -8,12 +8,17 @@ confirm_or_exit "This will install Node.js and npm. Do you want to proceed? (y/n
 
 resolve_versions "$SERVER_TOOL_ROOT/templates/node-versions" \
     'Which Node.js LTS version needs to be installed? ' \
-    0 \
+    1 \
     "$@"
-version="$SELECTED_VERSION"
-echo "Installing Node.js $version and npm..."
 
-ensure_nodesource_repo "$version"
-apt install -y nodejs
+remove_nodesource_nodejs
+
+for version in "${SELECTED_VERSIONS[@]}"; do
+    echo "Installing Node.js $version..."
+    install_nodejs_version "$version"
+done
+
+update_nodejs_default_symlink
+ensure_node_wrappers
 node -v
 npm -v

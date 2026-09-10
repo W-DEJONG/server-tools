@@ -2,8 +2,109 @@
 set -eo pipefail
 
 realm=""
+excepts=()
+excepts_provided=0
 positionals=()
-usage="Usage: server-tool enable-basic-auth <username> <application> <auth_user> [-r <realm>] [-y]"
+usage="Usage: server-tool enable-basic-auth <username> <application> <auth_user> [-r <realm>] [--except <path>] [-y]"
+
+normalize_auth_except_path() {
+  local path="$1"
+
+  path="${path%"${path##*[![:space:]]}"}"
+  path="${path#"${path%%[![:space:]]*}"}"
+  if [ -z "$path" ]; then
+    echo "Error: --except requires a path" >&2
+    return 1
+  fi
+  if [[ "$path" != /* ]]; then
+    echo "Error: except path must start with /: $path" >&2
+    return 1
+  fi
+  if [[ "$path" == *..* ]]; then
+    echo "Error: except path may not contain '..': $path" >&2
+    return 1
+  fi
+  while [ "$path" != "/" ] && [ "${path%/}" != "$path" ]; do
+    path="${path%/}"
+  done
+  if [ "$path" = "/" ]; then
+    echo "Error: except path '/' would disable basic auth for the whole site." >&2
+    return 1
+  fi
+  if ! [[ "$path" =~ ^/[A-Za-z0-9._/~-]+$ ]]; then
+    echo "Error: except path may only contain letters, numbers, dots, underscores, hyphens and slashes: $path" >&2
+    return 1
+  fi
+  printf '%s\n' "$path"
+}
+
+add_auth_except() {
+  local path="$1"
+  local existing
+  for existing in "${excepts[@]}"; do
+    if [ "$existing" = "$path" ]; then
+      return 0
+    fi
+  done
+  excepts+=("$path")
+}
+
+load_auth_excepts() {
+  local file="$1"
+  local line normalized
+  if [ ! -f "$file" ]; then
+    return 0
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    case "$line" in
+      ''|\#*)
+        continue
+        ;;
+    esac
+    normalized="$(normalize_auth_except_path "$line")" || exit 1
+    add_auth_except "$normalized"
+  done < "$file"
+}
+
+escape_nginx_map_regex() {
+  printf '%s' "$1" | sed -e 's/[][\\.*^$+?(){}|]/\\&/g'
+}
+
+write_basic_auth_files() {
+  local realm="$1"
+  local htpasswd_file="$2"
+  local auth_inc="$3"
+  local auth_map="$4"
+  local auth_var="$5"
+  shift 5
+
+  if [ $# -eq 0 ]; then
+    rm -f "$auth_map"
+    cat > "$auth_inc" <<EOF
+    auth_basic "$realm";
+    auth_basic_user_file $htpasswd_file;
+EOF
+    return 0
+  fi
+
+  {
+    echo "map \$request_uri \$$auth_var {"
+    echo "    default \"$realm\";"
+    local path escaped
+    for path in "$@"; do
+      escaped="$(escape_nginx_map_regex "$path")"
+      echo "    ~^${escaped}(/|\\?|\$)  \"off\";"
+    done
+    echo "}"
+  } > "$auth_map"
+
+  cat > "$auth_inc" <<EOF
+    auth_basic \$$auth_var;
+    auth_basic_user_file $htpasswd_file;
+EOF
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
     -r|--realm)
@@ -13,6 +114,17 @@ while [ $# -gt 0 ]; do
         exit 1
       fi
       realm="$2"
+      shift 2
+      ;;
+    --except)
+      if [ -z "${2:-}" ] || [[ "${2:-}" == -* ]]; then
+        echo "Error: --except requires a path"
+        echo "$usage"
+        exit 1
+      fi
+      excepts_provided=1
+      normalized="$(normalize_auth_except_path "$2")" || exit 1
+      add_auth_except "$normalized"
       shift 2
       ;;
     *)
@@ -41,15 +153,25 @@ if [ -z "$realm" ]; then
   realm="$app_name"
 fi
 
+except_file="$APP_ROOT/nginx/auth-except"
+if [ "$excepts_provided" -eq 0 ]; then
+  load_auth_excepts "$except_file"
+fi
+
 echo "Username: $username"
 echo "Application: $app_name"
 echo "Auth user: $auth_user"
 echo "Realm: $realm"
+if [ ${#excepts[@]} -gt 0 ]; then
+  echo "Except: ${excepts[*]}"
+fi
 confirm_or_exit "This will enable HTTP basic auth for $app_name. Do you want to proceed? (y/n): "
 
 apt-get -y install apache2-utils
 htpasswd_file="$APP_ROOT/nginx/.htpasswd"
 auth_inc="$APP_ROOT/nginx/auth.inc"
+auth_map="$APP_ROOT/nginx/auth-map.conf"
+auth_var="$(auth_basic_var_name "$username" "$app_name")"
 created_password=""
 
 if [ "${ASSUME_YES:-0}" = "1" ]; then
@@ -74,11 +196,18 @@ fi
 chmod 640 "$htpasswd_file"
 chown "$username:nginx" "$htpasswd_file"
 
-cat > "$auth_inc" <<EOF
-    auth_basic "$realm";
-    auth_basic_user_file $htpasswd_file;
-EOF
+if [ ${#excepts[@]} -gt 0 ]; then
+  printf '%s\n' "${excepts[@]}" > "$except_file"
+  chown "$username:$username" "$except_file"
+else
+  rm -f "$except_file"
+fi
+
+write_basic_auth_files "$realm" "$htpasswd_file" "$auth_inc" "$auth_map" "$auth_var" "${excepts[@]}"
 chown "$username:$username" "$auth_inc"
+if [ -f "$auth_map" ]; then
+  chown "$username:$username" "$auth_map"
+fi
 
 reload_nginx
 
@@ -87,6 +216,9 @@ echo "Basic auth is ready."
 echo "  Realm: $realm"
 echo "  User:  $auth_user"
 echo "  File:  $htpasswd_file"
+if [ ${#excepts[@]} -gt 0 ]; then
+  echo "  Open:  ${excepts[*]}"
+fi
 if [ -n "$created_password" ]; then
   echo "  Password: $created_password"
   echo "Store this password now; it is not saved by server-tool."
