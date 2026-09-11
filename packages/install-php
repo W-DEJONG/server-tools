@@ -30,5 +30,8 @@ for version in "${SELECTED_VERSIONS[@]}"; do
         php${version}-redis \
         php${version}-xml \
         php${version}-gmp \
-        php${version}-mongodb
+        php${version}-mongodb \
+        php${version}-bcmath \
+        php${version}-sqlite3 \
+        php${version}-imagick
 done
