@@ -64,10 +64,10 @@ if [ -z "$domain" ]; then
   domain="$app_name"
 fi
 
-if ! [[ "$domain" =~ ^[A-Za-z0-9._-]+$ ]]; then
-  echo "Error: invalid domain '$domain'"
-  exit 1
-fi
+require_valid_domain "$domain"
+
+existing_names="$(app_server_names_from_nginx "$APP_NGINX_CONF")"
+server_names="$(append_unique_name "$existing_names" "$domain")"
 
 if [ "$renew" -eq 1 ] && [ "$self_signed" -eq 0 ] && [ ! -d "/etc/letsencrypt/live/${domain}" ]; then
   self_signed=1
@@ -76,6 +76,7 @@ fi
 echo "Username: $username"
 echo "Application: $app_name"
 echo "Domain: $domain"
+echo "Server names: $server_names"
 if [ "$self_signed" -eq 1 ]; then
   echo "Certificate: self-signed"
 elif [ -n "$email" ]; then
@@ -105,35 +106,18 @@ create_self_signed_cert() {
 
 request_letsencrypt_cert() {
   local force_renewal="$1"
-  if ! command -v certbot >/dev/null 2>&1; then
-    echo "Error: certbot is not installed. Run: server-tool install nginx"
-    exit 1
-  fi
-
-  local certbot_args=(certonly --webroot -w "$APP_ROOT/current/public" -d "$domain" --non-interactive --agree-tos)
-  if [ -n "$email" ]; then
-    certbot_args+=(--email "$email")
-  else
-    certbot_args+=(--register-unsafely-without-email)
-  fi
+  local mode="issue"
   if [ "$force_renewal" -eq 1 ]; then
-    certbot_args+=(--force-renewal)
+    mode="replace"
   fi
-
-  echo "Requesting Let's Encrypt certificate..."
-  certbot "${certbot_args[@]}"
-  cp "/etc/letsencrypt/live/${domain}/fullchain.pem" "$ssl_cert"
-  cp "/etc/letsencrypt/live/${domain}/privkey.pem" "$ssl_key"
-
-  local hook_dir="/etc/letsencrypt/renewal-hooks/deploy"
-  mkdir -p "$hook_dir"
-  cat > "${hook_dir}/${username}_${app_name}.sh" <<EOF
-#!/bin/bash
-cp "/etc/letsencrypt/live/${domain}/fullchain.pem" "$ssl_cert"
-cp "/etc/letsencrypt/live/${domain}/privkey.pem" "$ssl_key"
-nginx -s reload
-EOF
-  chmod 750 "${hook_dir}/${username}_${app_name}.sh"
+  local names="$server_names"
+  if [ -z "$names" ]; then
+    names="$domain"
+  fi
+  # shellcheck disable=SC2086
+  request_letsencrypt_names "$domain" "$APP_ROOT/current/public" "$mode" "$email" $names
+  copy_letsencrypt_to_app "$domain" "$ssl_cert" "$ssl_key"
+  write_letsencrypt_deploy_hook "$username" "$app_name" "$domain" "$ssl_cert" "$ssl_key"
   ensure_certbot_autorenew
 }
 
@@ -186,7 +170,7 @@ else
     "$app_name" \
     "$APP_ROOT" \
     "$php_version" \
-    "$domain" \
+    "$server_names" \
     "$ssl_cert" \
     "$ssl_key"
   chown "$username:$username" "$APP_NGINX_CONF"

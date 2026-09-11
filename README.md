@@ -72,6 +72,9 @@ server-tool delete-app <username> <application> [-y]
 server-tool rename-app <username> <application> <new_name> [--keep-domain] [-y]
 server-tool switch-php <username> <application> [-p <php-version>] [-y]
 server-tool enable-ssl <username> <application> [-d <domain>] [-e <email>] [--self-signed] [--renew] [-y]
+server-tool add-domain <username> <application> <domain> [-y]
+server-tool list-domains <username> <application>
+server-tool remove-domain <username> <application> <domain> [-y]
 server-tool check-certbot-renew [-y]
 server-tool enable-basic-auth <username> <application> <auth_user> [-r <realm>] [--except <path>] [-y]
 server-tool enable-basic-auth testdev demo tester -r Staging --except /webhooks --except /up -y

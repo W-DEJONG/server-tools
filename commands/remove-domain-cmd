@@ -1,0 +1,54 @@
+#!/bin/bash
+set -eo pipefail
+
+usage="Usage: server-tool remove-domain <username> <application> <domain> [-y]"
+if [ $# -ne 3 ]; then
+  echo "$usage"
+  exit 1
+fi
+
+username="$1"
+app_name="$2"
+domain="$3"
+require_application "$username" "$app_name"
+require_valid_domain "$domain"
+
+current_names="$(app_server_names_from_nginx "$APP_NGINX_CONF")"
+if ! name_is_in_list "$domain" "$current_names"; then
+  echo "Error: domain '$domain' is not configured for $username/$app_name."
+  exit 1
+fi
+
+if [ "$(count_names "$current_names")" -le 1 ]; then
+  echo "Error: refusing to remove the last domain '$domain' from $username/$app_name."
+  exit 1
+fi
+
+new_names="$(remove_name_from_list "$current_names" "$domain")"
+
+echo "Username: $username"
+echo "Application: $app_name"
+echo "Remove domain: $domain"
+echo "Server names: $new_names"
+confirm_or_exit "This will remove domain '$domain' from $username/$app_name. Do you want to proceed? (y/n): "
+
+lineage=""
+if lineage="$(app_letsencrypt_lineage "$APP_NGINX_CONF")"; then
+  ssl_cert="$(app_ssl_cert_from_nginx "$APP_NGINX_CONF")"
+  ssl_key="$(app_ssl_key_from_nginx "$APP_NGINX_CONF")"
+  if [ -z "$ssl_cert" ] || [ -z "$ssl_key" ]; then
+    echo "Error: Let's Encrypt is active but ssl_certificate paths were not found in $APP_NGINX_CONF"
+    exit 1
+  fi
+  # shellcheck disable=SC2086
+  sync_app_letsencrypt_names "$username" "$app_name" "$APP_ROOT" "$lineage" "$ssl_cert" "$ssl_key" replace "" $new_names
+fi
+
+set_nginx_server_names "$APP_NGINX_CONF" "$new_names"
+chown "$username:$username" "$APP_NGINX_CONF"
+reload_nginx
+
+echo
+echo "Domain removed."
+echo "  Domain: $domain"
+echo "  Server names: $new_names"

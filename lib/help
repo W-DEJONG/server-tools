@@ -27,6 +27,7 @@ list_install_packages() {
 
 command_summary() {
   case "$1" in
+    add-domain) echo "Add a domain to an application's nginx server_name list" ;;
     apply-cron) echo "Apply an application's cron directory to the user's crontab" ;;
     backup-app) echo "Back up an application to S3, or enable/disable its daily cron" ;;
     check-certbot-renew) echo "Check certbot auto-renew and enable it if it is inactive" ;;
@@ -49,7 +50,9 @@ command_summary() {
     init-server) echo "Configure a new Debian server with default packages and settings" ;;
     install) echo "Install one or more application packages" ;;
     list-apps) echo "List installed applications as username application" ;;
+    list-domains) echo "List nginx server_name domains for an application" ;;
     rename-app) echo "Rename an application and rewrite its config paths" ;;
+    remove-domain) echo "Remove a domain from an application's nginx server_name list" ;;
     restore-db) echo "Restore an application's database from a dump file" ;;
     self-install) echo "Install the server-tool symlink into /usr/local/bin" ;;
     self-update) echo "Update server-tools from git" ;;
@@ -76,6 +79,30 @@ list_command_help() {
 
 show_command_help() {
   case "$1" in
+    add-domain)
+      cat <<'EOF'
+add-domain
+
+Add a domain to an application's nginx server_name list.
+
+Only server_name lines are changed. If Let's Encrypt is already active,
+the certificate is expanded to include the new name.
+
+Usage:
+  server-tool add-domain <username> <application> <domain> [-y]
+
+Arguments:
+  username       Linux user that owns the application
+  application    Application folder under /home/<username>/
+  domain         Hostname to add
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool add-domain testdev demo extra.example.test -y
+EOF
+      ;;
     apply-cron)
       cat <<'EOF'
 apply-cron
@@ -497,8 +524,9 @@ Enable HTTPS with Let's Encrypt or a self-signed certificate.
 
 Without --self-signed, certbot is used. Let's Encrypt auto-renew is
 checked (certbot.timer or /etc/cron.d/certbot) and enabled if needed.
---renew reissues the certificate; if no Let's Encrypt live directory
-exists, a self-signed cert is used.
+Existing server_name values are kept and -d is merged in. Let's Encrypt
+is requested for the full name list. --renew reissues the certificate;
+if no Let's Encrypt live directory exists, a self-signed cert is used.
 
 Usage:
   server-tool enable-ssl <username> <application> [options] [-y]
@@ -581,6 +609,25 @@ Examples:
   server-tool list-apps
 EOF
       ;;
+    list-domains)
+      cat <<'EOF'
+list-domains
+
+List nginx server_name domains for an application.
+
+Prints one unique name per line, sorted.
+
+Usage:
+  server-tool list-domains <username> <application>
+
+Arguments:
+  username       Linux user that owns the application
+  application    Application folder under /home/<username>/
+
+Examples:
+  server-tool list-domains testdev demo
+EOF
+      ;;
     rename-app)
       cat <<'EOF'
 rename-app
@@ -605,6 +652,31 @@ Options:
 Examples:
   server-tool rename-app testdev demo demo2 -y
   server-tool rename-app testdev demo demo2 --keep-domain -y
+EOF
+      ;;
+    remove-domain)
+      cat <<'EOF'
+remove-domain
+
+Remove a domain from an application's nginx server_name list.
+
+Only server_name lines are changed. The last remaining name cannot be
+removed. If Let's Encrypt is already active, the certificate is reissued
+for the remaining names.
+
+Usage:
+  server-tool remove-domain <username> <application> <domain> [-y]
+
+Arguments:
+  username       Linux user that owns the application
+  application    Application folder under /home/<username>/
+  domain         Hostname to remove
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool remove-domain testdev demo extra.example.test -y
 EOF
       ;;
     restore-db)

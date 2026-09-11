@@ -137,6 +137,212 @@ app_server_names_from_nginx() {
   ' "$conf"
 }
 
+require_valid_domain() {
+  if ! [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "Error: invalid domain '$1'"
+    exit 1
+  fi
+}
+
+name_is_in_list() {
+  local needle="$1"
+  local names="$2"
+  local token
+  for token in $names; do
+    if [ "$token" = "$needle" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+append_unique_name() {
+  local names="$1"
+  local token="$2"
+  if [ -z "$token" ]; then
+    printf '%s\n' "$names"
+    return 0
+  fi
+  if name_is_in_list "$token" "$names"; then
+    printf '%s\n' "$names"
+    return 0
+  fi
+  if [ -n "$names" ]; then
+    printf '%s %s\n' "$names" "$token"
+  else
+    printf '%s\n' "$token"
+  fi
+}
+
+remove_name_from_list() {
+  local names="$1"
+  local needle="$2"
+  local out="" token
+  for token in $names; do
+    if [ "$token" = "$needle" ]; then
+      continue
+    fi
+    if [ -n "$out" ]; then
+      out="${out} ${token}"
+    else
+      out="$token"
+    fi
+  done
+  printf '%s\n' "$out"
+}
+
+count_names() {
+  local names="$1"
+  local n=0 token
+  for token in $names; do
+    n=$((n + 1))
+  done
+  printf '%s\n' "$n"
+}
+
+set_nginx_server_names() {
+  local conf="$1"
+  local names="$2"
+  local tmp
+  if [ -z "$names" ]; then
+    echo "Error: server_name list cannot be empty."
+    exit 1
+  fi
+  tmp="${conf}.tmp.$$"
+  awk -v names="$names" '
+    /^[[:space:]]*server_name[[:space:]]+/ {
+      match($0, /^[[:space:]]*/)
+      print substr($0, RSTART, RLENGTH) "server_name " names ";"
+      next
+    }
+    { print }
+  ' "$conf" > "$tmp"
+  mv "$tmp" "$conf"
+}
+
+app_ssl_cert_from_nginx() {
+  local conf="$1"
+  sed -n 's/^[[:space:]]*ssl_certificate[[:space:]]*\([^;[:space:]]*\).*/\1/p' "$conf" | head -1
+}
+
+app_ssl_key_from_nginx() {
+  local conf="$1"
+  sed -n 's/^[[:space:]]*ssl_certificate_key[[:space:]]*\([^;[:space:]]*\).*/\1/p' "$conf" | head -1
+}
+
+app_letsencrypt_lineage() {
+  local conf="$1"
+  local cert lineage name
+  cert="$(app_ssl_cert_from_nginx "$conf")"
+  if [ -n "$cert" ]; then
+    lineage="$(basename "$cert")"
+    lineage="${lineage%.pem}"
+    if [ -d "/etc/letsencrypt/live/${lineage}" ]; then
+      printf '%s\n' "$lineage"
+      return 0
+    fi
+  fi
+  for name in $(app_server_names_from_nginx "$conf"); do
+    if [ -d "/etc/letsencrypt/live/${name}" ]; then
+      printf '%s\n' "$name"
+      return 0
+    fi
+  done
+  return 1
+}
+
+request_letsencrypt_names() {
+  local lineage="$1"
+  local webroot="$2"
+  local mode="$3"
+  local email="$4"
+  shift 4
+
+  if [ $# -lt 1 ]; then
+    echo "Error: at least one domain is required for Let's Encrypt."
+    exit 1
+  fi
+
+  if ! command -v certbot >/dev/null 2>&1; then
+    echo "Error: certbot is not installed. Run: server-tool install nginx"
+    exit 1
+  fi
+
+  local certbot_args=(certonly --webroot -w "$webroot" --cert-name "$lineage" --non-interactive --agree-tos)
+  case "$mode" in
+    issue)
+      ;;
+    expand)
+      certbot_args+=(--expand)
+      ;;
+    replace)
+      certbot_args+=(--force-renewal)
+      ;;
+    *)
+      echo "Error: unknown Let's Encrypt mode '$mode'."
+      exit 1
+      ;;
+  esac
+
+  if [ -n "$email" ]; then
+    certbot_args+=(--email "$email")
+  else
+    certbot_args+=(--register-unsafely-without-email)
+  fi
+
+  local name
+  for name in "$@"; do
+    certbot_args+=(-d "$name")
+  done
+
+  echo "Requesting Let's Encrypt certificate..."
+  certbot "${certbot_args[@]}"
+}
+
+copy_letsencrypt_to_app() {
+  local lineage="$1"
+  local ssl_cert="$2"
+  local ssl_key="$3"
+  cp "/etc/letsencrypt/live/${lineage}/fullchain.pem" "$ssl_cert"
+  cp "/etc/letsencrypt/live/${lineage}/privkey.pem" "$ssl_key"
+}
+
+write_letsencrypt_deploy_hook() {
+  local username="$1"
+  local app_name="$2"
+  local lineage="$3"
+  local ssl_cert="$4"
+  local ssl_key="$5"
+  local hook_dir="/etc/letsencrypt/renewal-hooks/deploy"
+  mkdir -p "$hook_dir"
+  cat > "${hook_dir}/${username}_${app_name}.sh" <<EOF
+#!/bin/bash
+cp "/etc/letsencrypt/live/${lineage}/fullchain.pem" "$ssl_cert"
+cp "/etc/letsencrypt/live/${lineage}/privkey.pem" "$ssl_key"
+nginx -s reload
+EOF
+  chmod 750 "${hook_dir}/${username}_${app_name}.sh"
+}
+
+sync_app_letsencrypt_names() {
+  local username="$1"
+  local app_name="$2"
+  local app_root="$3"
+  local lineage="$4"
+  local ssl_cert="$5"
+  local ssl_key="$6"
+  local mode="$7"
+  local email="$8"
+  shift 8
+
+  request_letsencrypt_names "$lineage" "$app_root/current/public" "$mode" "$email" "$@"
+  copy_letsencrypt_to_app "$lineage" "$ssl_cert" "$ssl_key"
+  write_letsencrypt_deploy_hook "$username" "$app_name" "$lineage" "$ssl_cert" "$ssl_key"
+  chmod 640 "$ssl_cert" "$ssl_key"
+  chown "$username:$username" "$(dirname "$ssl_cert")" "$ssl_cert" "$ssl_key"
+  ensure_certbot_autorenew
+}
+
 render_nginx_app_conf() {
   local template="$1"
   local dest="$2"

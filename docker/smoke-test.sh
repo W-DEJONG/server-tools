@@ -315,6 +315,40 @@ echo "==> enable-ssl testdev demo --self-signed --renew"
 server-tool enable-ssl testdev demo -d demo.example.test --self-signed --renew -y
 openssl x509 -in /home/testdev/demo/nginx/ssl/demo.example.test.pem -noout -checkend $((86400 * 365 * 14))
 
+echo "==> list-domains testdev demo"
+server-tool list-domains testdev demo | grep -qxF demo.example.test
+
+echo "==> add-domain testdev demo extra.example.test"
+server-tool add-domain testdev demo extra.example.test -y
+grep -qE 'server_name[[:space:]]+.*extra\.example\.test' /home/testdev/demo/nginx/demo.conf
+grep -q "listen 443 ssl" /home/testdev/demo/nginx/demo.conf
+grep -q "php${php_version}-fpm-testdev-demo.sock" /home/testdev/demo/nginx/demo.conf
+test -f /home/testdev/demo/nginx/ssl/demo.example.test.pem
+test -f /home/testdev/demo/nginx/ssl/demo.example.test.key
+server-tool list-domains testdev demo | grep -qxF extra.example.test
+if server-tool add-domain testdev demo extra.example.test -y; then
+    echo "Expected duplicate add-domain to fail"
+    exit 1
+fi
+
+echo "==> remove-domain testdev demo extra.example.test"
+server-tool remove-domain testdev demo extra.example.test -y
+! grep -qE 'server_name[[:space:]]+.*extra\.example\.test' /home/testdev/demo/nginx/demo.conf
+grep -q "listen 443 ssl" /home/testdev/demo/nginx/demo.conf
+grep -q "php${php_version}-fpm-testdev-demo.sock" /home/testdev/demo/nginx/demo.conf
+if server-tool remove-domain testdev demo extra.example.test -y; then
+    echo "Expected remove-domain for unknown domain to fail"
+    exit 1
+fi
+if server-tool list-domains testdev demo | grep -qxF demo; then
+    server-tool remove-domain testdev demo demo -y
+fi
+if server-tool remove-domain testdev demo demo.example.test -y; then
+    echo "Expected remove-domain for the last domain to fail"
+    exit 1
+fi
+server-tool list-domains testdev demo | grep -qxF demo.example.test
+
 echo "==> enable-scheduler testdev demo"
 test -d /home/testdev/demo/cron
 server-tool enable-scheduler testdev demo -y

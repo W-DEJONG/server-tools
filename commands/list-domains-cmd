@@ -1,0 +1,20 @@
+#!/bin/bash
+set -eo pipefail
+
+usage="Usage: server-tool list-domains <username> <application>"
+if [ $# -ne 2 ]; then
+  echo "$usage"
+  exit 1
+fi
+
+username="$1"
+app_name="$2"
+require_application "$username" "$app_name"
+
+names="$(app_server_names_from_nginx "$APP_NGINX_CONF")"
+if [ -z "$names" ]; then
+  exit 0
+fi
+
+# shellcheck disable=SC2086
+printf '%s\n' $names | sort -u
