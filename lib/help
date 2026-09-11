@@ -1,0 +1,1005 @@
+#!/bin/bash
+
+is_known_command() {
+  [ -e "$SERVER_TOOL_ROOT/commands/$1-cmd" ]
+}
+
+is_install_package() {
+  [ -e "$SERVER_TOOL_ROOT/packages/install-$1" ]
+}
+
+package_accepts_args() {
+  case "$1" in
+    php|npm|postgresql|aws|composer) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+list_install_packages() {
+  local f name
+  for f in "$SERVER_TOOL_ROOT/packages/install-"*; do
+    [ -e "$f" ] || continue
+    name="$(basename "$f")"
+    name="${name#install-}"
+    printf '%s\n' "$name"
+  done | sort
+}
+
+command_summary() {
+  case "$1" in
+    apply-cron) echo "Apply an application's cron directory to the user's crontab" ;;
+    backup-app) echo "Back up an application to S3, or enable/disable its daily cron" ;;
+    check-certbot-renew) echo "Check certbot auto-renew and enable it if it is inactive" ;;
+    create-app) echo "Create a web application layout, nginx vhost, and php-fpm pool" ;;
+    create-db) echo "Create a PostgreSQL or MySQL database and matching user" ;;
+    create-github-runner) echo "Install and register a GitHub Actions self-hosted runner" ;;
+    create-horizon) echo "Create a Supervisor program for Laravel Horizon" ;;
+    create-queue) echo "Create a Supervisor program for Laravel queue workers" ;;
+    create-sudo-user) echo "Create a sudo user with SSH key login" ;;
+    create-user) echo "Create an application user and group" ;;
+    delete-app) echo "Delete an application and its nginx, php-fpm, and cron config" ;;
+    delete-user) echo "Delete a user, home directory, and related app config" ;;
+    disable-scheduler) echo "Remove the Laravel scheduler cron job for an application" ;;
+    disable-ssh-password) echo "Disable SSH password logins (key authentication only)" ;;
+    dump-db) echo "Dump an application's database to a file" ;;
+    enable-basic-auth) echo "Enable HTTP basic authentication on an application" ;;
+    enable-scheduler) echo "Enable the Laravel scheduler cron job for an application" ;;
+    enable-ssl) echo "Enable HTTPS with Let's Encrypt or a self-signed certificate" ;;
+    help) echo "Show detailed help for a command" ;;
+    init-server) echo "Configure a new Debian server with default packages and settings" ;;
+    install) echo "Install one or more application packages" ;;
+    list-apps) echo "List installed applications as username application" ;;
+    rename-app) echo "Rename an application and rewrite its config paths" ;;
+    restore-db) echo "Restore an application's database from a dump file" ;;
+    self-install) echo "Install the server-tool symlink into /usr/local/bin" ;;
+    self-update) echo "Update server-tools from git" ;;
+    switch-php) echo "Switch an application to another PHP version" ;;
+    test-backup) echo "Upload a small test object to verify S3 backup config" ;;
+    *) echo "No summary available" ;;
+  esac
+}
+
+list_command_help() {
+  local f name
+  echo "Usage: server-tool help <command>"
+  echo
+  echo "Available commands:"
+  for f in "$SERVER_TOOL_ROOT/commands/"*-cmd; do
+    [ -e "$f" ] || continue
+    name="$(basename "$f")"
+    name="${name%-cmd}"
+    printf '  %-22s %s\n' "$name" "$(command_summary "$name")"
+  done
+  echo
+  echo "Use: server-tool help <command>"
+}
+
+show_command_help() {
+  case "$1" in
+    apply-cron)
+      cat <<'EOF'
+apply-cron
+
+Apply an application's cron directory to the user's crontab.
+
+Usage:
+  server-tool apply-cron <username> <application> [-y]
+
+Arguments:
+  username       Linux user that owns the application
+  application    Application folder under /home/<username>/
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool apply-cron testdev demo -y
+EOF
+      ;;
+    backup-app)
+      cat <<'EOF'
+backup-app
+
+Back up an application to S3, or enable/disable its daily cron.
+
+Without --enable or --disable, zips the application (and database when
+.env.db is present) and uploads it to S3. Requires /etc/server-tool/backup.conf,
+written by: server-tool install aws <bucket>
+
+Usage:
+  server-tool backup-app <username> <application> [--enable|--disable] [-y]
+
+Arguments:
+  username       Linux user that owns the application
+  application    Application folder under /home/<username>/
+
+Options:
+  --enable       Install a daily cron job (03:00) that runs this backup
+  --disable      Remove the daily backup cron job
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool backup-app testdev demo -y
+  server-tool backup-app testdev demo --enable -y
+  server-tool backup-app testdev demo --disable -y
+EOF
+      ;;
+    create-app)
+      cat <<'EOF'
+create-app
+
+Create a web application layout, nginx vhost, and php-fpm pool.
+
+Usage:
+  server-tool create-app <username> <application> [options] [-y]
+
+Arguments:
+  username       Linux user that owns the application
+  application    Application folder under /home/<username>/
+
+Options:
+  -u, --create-user          Create the user if it does not exist
+  -d, --database NAME        Create a database and write .env.db
+  -t, --type pgsql|mysql     Database engine
+  --host HOST                Remote database host
+  --port PORT                Remote database port
+  --admin-user USER          Remote admin user
+  --admin-password PASS      Remote admin password (prompted if omitted)
+  --user-host HOST           MySQL user host (default %)
+  -p, --php VERSION          PHP version for the fpm pool
+  -y, --yes                  Skip confirmation prompts
+
+Examples:
+  server-tool create-app testdev demo -u -d mijnapp -p 8.4 -y
+  server-tool create-app testdev demo -d mijnapp -t mysql -y
+  server-tool create-app testdev demo -d mijnapp -t mysql --host db.internal --admin-user root -y
+  server-tool create-app testdev demo -d mijnapp -t pgsql --host db.internal --admin-user postgres -y
+EOF
+      ;;
+    create-db)
+      cat <<'EOF'
+create-db
+
+Create a PostgreSQL or MySQL database and a matching user.
+
+When both engines are installed, -t is required. Omit --admin-password
+to be prompted (like mysql -p).
+
+Usage:
+  server-tool create-db <db_name> [options] [-y]
+
+Arguments:
+  db_name                    Database and user name to create
+
+Options:
+  -t, --type pgsql|mysql     Database engine
+  --host HOST                Remote database host
+  --port PORT                Remote database port
+  --admin-user USER          Remote admin user
+  --admin-password PASS      Remote admin password (prompted if omitted)
+  --user-host HOST           MySQL user host (default %)
+  -y, --yes                  Skip confirmation prompts
+
+Examples:
+  server-tool create-db mijnapp -y
+  server-tool create-db mijnapp -t mysql --host db.internal --admin-user root
+  server-tool create-db mijnapp -t pgsql --host db.internal --admin-user postgres
+EOF
+      ;;
+    create-github-runner)
+      cat <<'EOF'
+create-github-runner
+
+Install and register a GitHub Actions self-hosted runner.
+
+The URL must be https://github.com/<org> or https://github.com/<org>/<repo>.
+The runner user defaults to github-runner and cannot be root.
+
+Usage:
+  server-tool create-github-runner <url> <token> [options] [-y]
+
+Arguments:
+  url            GitHub organization or repository URL
+  token          Registration token from GitHub
+
+Options:
+  -n, --name NAME            Runner name
+  -l, --labels LABELS        Comma-separated runner labels
+  -u, --user USERNAME        Linux user that runs the runner (default github-runner)
+  -y, --yes                  Skip confirmation prompts
+
+Examples:
+  server-tool create-github-runner https://github.com/my-org AAAA -n web-1 -l deploy -y
+EOF
+      ;;
+    create-horizon)
+      cat <<'EOF'
+create-horizon
+
+Create a Supervisor program for Laravel Horizon.
+
+Usage:
+  server-tool create-horizon <username> <application> [options] [-y]
+
+Arguments:
+  username       Linux user that owns the application
+  application    Application folder under /home/<username>/
+
+Options:
+  -p, --php VERSION          PHP binary used to run Horizon
+  -n, --numprocs N           Number of Supervisor processes (default 1)
+  -y, --yes                  Skip confirmation prompts
+
+Examples:
+  server-tool create-horizon testdev demo -y
+  server-tool create-horizon testdev demo -p 8.4 -n 2 -y
+EOF
+      ;;
+    create-queue)
+      cat <<'EOF'
+create-queue
+
+Create a Supervisor program for Laravel queue workers.
+
+Usage:
+  server-tool create-queue <username> <application> [options] [-y]
+
+Arguments:
+  username       Linux user that owns the application
+  application    Application folder under /home/<username>/
+
+Options:
+  -p, --php VERSION          PHP binary used to run the worker
+  -n, --numprocs N           Number of Supervisor processes (default 1)
+  -q, --queue NAME           Queue name
+  -c, --connection NAME      Queue connection
+  --tries N                  Job attempts (default 3)
+  --timeout SECONDS          Job timeout (default 60)
+  --sleep SECONDS            Sleep when no job is available (default 3)
+  -y, --yes                  Skip confirmation prompts
+
+Examples:
+  server-tool create-queue testdev demo -y
+  server-tool create-queue testdev demo -q emails -c redis --tries 5 -y
+EOF
+      ;;
+    create-sudo-user)
+      cat <<'EOF'
+create-sudo-user
+
+Create a sudo user with SSH key login.
+
+A public key is required when creating a new user. With --no-password
+the account has no password and must set one at first login.
+
+Usage:
+  server-tool create-sudo-user <username> [options] [-y]
+
+Arguments:
+  username       Linux username to create
+
+Options:
+  -k, --ssh-key KEY-OR-FILE  SSH public key, or path to a .pub file
+  --no-password              Create the account without a password
+  -y, --yes                  Skip confirmation prompts
+
+Examples:
+  server-tool create-sudo-user deploy -k ~/.ssh/id_ed25519.pub -y
+  server-tool create-sudo-user deploy --no-password -k ~/.ssh/id_ed25519.pub -y
+EOF
+      ;;
+    create-user)
+      cat <<'EOF'
+create-user
+
+Create an application user and group, SSH keys, and login bashrc.
+
+The user is added to the nginx group so cachetool can reach the FPM socket.
+
+Usage:
+  server-tool create-user <username> [options] [-y]
+
+Arguments:
+  username       Linux username to create
+
+Options:
+  -p, --php VERSION          Install this PHP version for later application pools
+  -y, --yes                  Skip confirmation prompts
+
+Examples:
+  server-tool create-user testdev -y
+  server-tool create-user testdev -p 8.4 -y
+EOF
+      ;;
+    delete-app)
+      cat <<'EOF'
+delete-app
+
+Delete an application and its nginx, php-fpm, supervisor, and cron config.
+
+Usage:
+  server-tool delete-app <username> <application> [-y]
+
+Arguments:
+  username       Linux user that owns the application
+  application    Application folder under /home/<username>/
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool delete-app testdev demo -y
+EOF
+      ;;
+    delete-user)
+      cat <<'EOF'
+delete-user
+
+Delete a user, home directory, and related nginx and php-fpm config.
+
+System users such as root, admin, nginx, and www-data are refused.
+
+Usage:
+  server-tool delete-user <username> [-y]
+
+Arguments:
+  username       Linux username to delete
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool delete-user testdev -y
+EOF
+      ;;
+    disable-scheduler)
+      cat <<'EOF'
+disable-scheduler
+
+Remove the Laravel scheduler cron job for an application.
+
+Other files in the application's cron directory are left in place.
+
+Usage:
+  server-tool disable-scheduler <username> <application> [-y]
+
+Arguments:
+  username       Linux user that owns the application
+  application    Application folder under /home/<username>/
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool disable-scheduler testdev demo -y
+EOF
+      ;;
+    disable-ssh-password)
+      cat <<'EOF'
+disable-ssh-password
+
+Disable SSH password logins so only key authentication works.
+
+Refuses to run if no authorized_keys files are found, to avoid lockout.
+
+Usage:
+  server-tool disable-ssh-password [-y]
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool disable-ssh-password -y
+EOF
+      ;;
+    dump-db)
+      cat <<'EOF'
+dump-db
+
+Dump an application's database to a file.
+
+Reads connection settings from the application's .env.db. PostgreSQL dumps
+are custom-format .dump files; MySQL dumps are gzipped SQL.
+
+Usage:
+  server-tool dump-db <username> <application> [<target-folder>] [-y]
+
+Arguments:
+  username         Linux user that owns the application
+  application      Application folder under /home/<username>/
+  target-folder    Destination directory (default: current directory)
+
+Options:
+  -y, --yes        Skip confirmation prompts
+
+Examples:
+  server-tool dump-db testdev demo -y
+  server-tool dump-db testdev demo /tmp -y
+EOF
+      ;;
+    enable-basic-auth)
+      cat <<'EOF'
+enable-basic-auth
+
+Enable HTTP basic authentication on an application.
+
+Repeat --except to skip multiple paths. Paths already stored for the app
+are kept when --except is omitted.
+
+Usage:
+  server-tool enable-basic-auth <username> <application> <auth_user> [options] [-y]
+
+Arguments:
+  username       Linux user that owns the application
+  application    Application folder under /home/<username>/
+  auth_user      Username stored in the application's htpasswd file
+
+Options:
+  -r, --realm NAME           Authentication realm (browser prompt)
+  --except PATH              Path that skips basic auth (repeatable, must start with /)
+  -y, --yes                  Skip confirmation prompts
+
+Examples:
+  server-tool enable-basic-auth testdev demo tester -y
+  server-tool enable-basic-auth testdev demo tester -r Staging --except /webhooks --except /up -y
+EOF
+      ;;
+    enable-scheduler)
+      cat <<'EOF'
+enable-scheduler
+
+Enable the Laravel scheduler cron job for an application.
+
+Writes cron/scheduler and applies the application's cron directory.
+
+Usage:
+  server-tool enable-scheduler <username> <application> [options] [-y]
+
+Arguments:
+  username       Linux user that owns the application
+  application    Application folder under /home/<username>/
+
+Options:
+  -p, --php VERSION          PHP binary used to run schedule:run
+  -y, --yes                  Skip confirmation prompts
+
+Examples:
+  server-tool enable-scheduler testdev demo -y
+  server-tool enable-scheduler testdev demo -p 8.4 -y
+EOF
+      ;;
+    check-certbot-renew)
+      cat <<'EOF'
+check-certbot-renew
+
+Check certbot auto-renew and enable it if it is inactive.
+
+Prefers systemd certbot.timer; falls back to /etc/cron.d/certbot.
+If the timer exists but is not enabled and active, you are asked
+before enabling it. Also lists Let's Encrypt deploy hooks.
+
+Usage:
+  server-tool check-certbot-renew [-y]
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool check-certbot-renew
+  server-tool check-certbot-renew -y
+EOF
+      ;;
+    enable-ssl)
+      cat <<'EOF'
+enable-ssl
+
+Enable HTTPS with Let's Encrypt or a self-signed certificate.
+
+Without --self-signed, certbot is used. Let's Encrypt auto-renew is
+checked (certbot.timer or /etc/cron.d/certbot) and enabled if needed.
+--renew reissues the certificate; if no Let's Encrypt live directory
+exists, a self-signed cert is used.
+
+Usage:
+  server-tool enable-ssl <username> <application> [options] [-y]
+
+Arguments:
+  username       Linux user that owns the application
+  application    Application folder under /home/<username>/
+
+Options:
+  -d, --domain DOMAIN        Certificate domain (default: current server_name)
+  -e, --email ADDRESS        Let's Encrypt contact email
+  --self-signed              Create a self-signed certificate instead of Let's Encrypt
+  --renew                    Renew or replace the existing certificate
+  -y, --yes                  Skip confirmation prompts
+
+Examples:
+  server-tool enable-ssl testdev demo -d demo.example.test --self-signed -y
+  server-tool enable-ssl testdev demo -d demo.example.test --self-signed --renew -y
+  server-tool enable-ssl testdev demo -d demo.example.com -e admin@example.com -y
+EOF
+      ;;
+    help)
+      cat <<'EOF'
+help
+
+Show detailed help for a command.
+
+Does not require root. With no command, lists all available commands.
+
+Usage:
+  server-tool help [<command>]
+  server-tool help install [<package>]
+
+Arguments:
+  command        Command name (see server-tool help)
+  package        Install package name (see server-tool help install)
+
+Examples:
+  server-tool help
+  server-tool help create-app
+  server-tool help install
+  server-tool help install php
+EOF
+      ;;
+    init-server)
+      cat <<'EOF'
+init-server
+
+Configure a new Debian server with default packages and settings.
+
+Sets UTC, installs common tools, enables the SURY PHP repo, and upgrades
+packages. Extra arguments are ignored.
+
+Usage:
+  server-tool init-server [-y]
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool init-server
+  server-tool init-server -y
+EOF
+      ;;
+    install)
+      show_install_help
+      ;;
+    list-apps)
+      cat <<'EOF'
+list-apps
+
+List installed applications as "username application".
+
+An application is detected by /home/<user>/<app>/nginx/<app>.conf.
+
+Usage:
+  server-tool list-apps
+
+Examples:
+  server-tool list-apps
+EOF
+      ;;
+    rename-app)
+      cat <<'EOF'
+rename-app
+
+Rename an application and rewrite nginx, php-fpm, supervisor, and cron paths.
+
+By default the new name is added as a server_name. --keep-domain keeps the
+existing certificate domain in the vhost.
+
+Usage:
+  server-tool rename-app <username> <application> <new_name> [--keep-domain] [-y]
+
+Arguments:
+  username       Linux user that owns the application
+  application    Current application name
+  new_name       New application name
+
+Options:
+  --keep-domain  Keep the existing SSL/server_name domain
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool rename-app testdev demo demo2 -y
+  server-tool rename-app testdev demo demo2 --keep-domain -y
+EOF
+      ;;
+    restore-db)
+      cat <<'EOF'
+restore-db
+
+Restore an application's database from a dump file.
+
+Reads connection settings from the application's .env.db. Use a .dump file
+for PostgreSQL or a .sql.gz file for MySQL.
+
+Usage:
+  server-tool restore-db <username> <application> <file> [-y]
+
+Arguments:
+  username       Linux user that owns the application
+  application    Application folder under /home/<username>/
+  file           Dump file created by dump-db
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool restore-db testdev demo /tmp/demo-20260101-120000.dump -y
+EOF
+      ;;
+    self-install)
+      cat <<'EOF'
+self-install
+
+Install the server-tool symlink into /usr/local/bin.
+
+Usage:
+  server-tool self-install
+
+Examples:
+  server-tool self-install
+EOF
+      ;;
+    self-update)
+      cat <<'EOF'
+self-update
+
+Update server-tools from git (git pull in the install directory).
+
+Usage:
+  server-tool self-update
+
+Examples:
+  server-tool self-update
+EOF
+      ;;
+    switch-php)
+      cat <<'EOF'
+switch-php
+
+Switch an application to another PHP version.
+
+Updates the nginx socket, php-fpm pool, and PHP binaries in Horizon, queue,
+and scheduler config. The new version must differ from the current one.
+
+Usage:
+  server-tool switch-php <username> <application> [-p <php-version>] [-y]
+
+Arguments:
+  username       Linux user that owns the application
+  application    Application folder under /home/<username>/
+
+Options:
+  -p, --php VERSION          Target PHP version (prompted if omitted)
+  -y, --yes                  Skip confirmation prompts
+
+Examples:
+  server-tool switch-php testdev demo -p 8.5 -y
+EOF
+      ;;
+    test-backup)
+      cat <<'EOF'
+test-backup
+
+Upload a small test object to verify S3 backup config.
+
+Requires /etc/server-tool/backup.conf, written by:
+  server-tool install aws <bucket>
+
+Usage:
+  server-tool test-backup [-y]
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+      server-tool test-backup -y
+EOF
+      ;;
+    *)
+      printf '%s\n\n%s\n\nNo detailed help is available for this command.\n' "$1" "$(command_summary "$1")"
+      ;;
+  esac
+}
+
+show_install_help() {
+  local name extra
+  cat <<'EOF'
+install
+
+Install one or more application packages.
+
+Packages that accept extra arguments: php, npm, postgresql, aws, composer.
+Multiple packages can be listed in one invocation.
+
+Usage:
+  server-tool install <package> [<version> ...] [<package> [<version> ...]] [-y]
+
+Arguments:
+  package        Package name (see list below)
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Packages:
+EOF
+  while IFS= read -r name; do
+    extra=""
+    if package_accepts_args "$name"; then
+      extra=" (accepts extra args)"
+    fi
+    printf '  %s%s\n' "$name" "$extra"
+  done < <(list_install_packages)
+  cat <<'EOF'
+
+Examples:
+  server-tool install nginx
+  server-tool install php -y 8.4 8.5
+  server-tool install npm -y 22 24
+  server-tool install composer --version 2.8.12
+  server-tool install aws my-backups -y
+  server-tool install postgresql redis php 8.4 -y
+
+Use: server-tool help install <package>
+EOF
+}
+
+show_install_package_help() {
+  case "$1" in
+    aws)
+      cat <<'EOF'
+install aws
+
+Install the AWS CLI. With a bucket name, write /etc/server-tool/backup.conf
+used by backup-app and test-backup.
+
+Usage:
+  server-tool install aws [<bucket>] [-y]
+
+Arguments:
+  bucket         S3 bucket for backups (optional; prompted if omitted)
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool install aws
+  server-tool install aws my-backups
+  server-tool install aws my-backups -y
+EOF
+      ;;
+    cachetool)
+      cat <<'EOF'
+install cachetool
+
+Install cachetool (PHP opcache CLI) to /usr/local/bin/cachetool.
+
+Usage:
+  server-tool install cachetool [-y]
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool install cachetool -y
+EOF
+      ;;
+    composer)
+      cat <<'EOF'
+install composer
+
+Install or update Composer in /usr/local/bin/composer.
+
+Usage:
+  server-tool install composer [--version <version>] [-y]
+
+Options:
+  --version VERSION          Install this Composer version (default: latest)
+  -y, --yes                  Skip confirmation prompts
+
+Examples:
+  server-tool install composer -y
+  server-tool install composer --version 2.8.12
+EOF
+      ;;
+    mariadb-client)
+      cat <<'EOF'
+install mariadb-client
+
+Install the MariaDB client tools.
+
+Usage:
+  server-tool install mariadb-client [-y]
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool install mariadb-client -y
+EOF
+      ;;
+    mariadb-server)
+      cat <<'EOF'
+install mariadb-server
+
+Install MariaDB server.
+
+Usage:
+  server-tool install mariadb-server [-y]
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool install mariadb-server -y
+EOF
+      ;;
+    memcached)
+      cat <<'EOF'
+install memcached
+
+Install memcached.
+
+Usage:
+  server-tool install memcached [-y]
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool install memcached -y
+EOF
+      ;;
+    meilisearch)
+      cat <<'EOF'
+install meilisearch
+
+Install and enable the Meilisearch service.
+
+Usage:
+  server-tool install meilisearch [-y]
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool install meilisearch -y
+EOF
+      ;;
+    mysql)
+      cat <<'EOF'
+install mysql
+
+Install MySQL server.
+
+Usage:
+  server-tool install mysql [-y]
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool install mysql -y
+EOF
+      ;;
+    mysql-client)
+      cat <<'EOF'
+install mysql-client
+
+Install the MySQL client tools.
+
+Usage:
+  server-tool install mysql-client [-y]
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool install mysql-client -y
+EOF
+      ;;
+    nginx)
+      cat <<'EOF'
+install nginx
+
+Install nginx, certbot, and open HTTP/HTTPS in ufw.
+
+Usage:
+  server-tool install nginx [-y]
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool install nginx -y
+EOF
+      ;;
+    npm)
+      cat <<'EOF'
+install npm
+
+Install Node.js LTS versions and the node/npm/npx wrappers.
+
+node/npm/npx follow .nvmrc (major version). Without it, the highest
+installed LTS is used.
+
+Usage:
+  server-tool install npm [<version> ...] [-y]
+
+Arguments:
+  version        Node.js major LTS version (repeatable; prompted if omitted)
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool install npm
+  server-tool install npm -y 24
+  server-tool install npm -y 22 24
+EOF
+      ;;
+    php)
+      cat <<'EOF'
+install php
+
+Install PHP-FPM, CLI, and common extensions from the SURY repo.
+
+Usage:
+  server-tool install php [<version> ...] [-y]
+
+Arguments:
+  version        PHP version (repeatable; prompted if omitted)
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool install php
+  server-tool install php -y 8.4 8.5
+EOF
+      ;;
+    postgresql)
+      cat <<'EOF'
+install postgresql
+
+Install PostgreSQL server and client from the PGDG repo.
+
+Usage:
+  server-tool install postgresql [<version> ...] [-y]
+
+Arguments:
+  version        PostgreSQL major version (repeatable; prompted if omitted)
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool install postgresql
+  server-tool install postgresql -y 17 18
+EOF
+      ;;
+    redis)
+      cat <<'EOF'
+install redis
+
+Install Redis.
+
+Usage:
+  server-tool install redis [-y]
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool install redis -y
+EOF
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}

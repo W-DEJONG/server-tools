@@ -22,6 +22,21 @@ if server-tool definitely-not-a-command; then
     exit 1
 fi
 
+echo "==> no arguments shows help"
+server-tool | grep -q create-app
+
+echo "==> help lists commands"
+server-tool help | grep -q create-app
+
+echo "==> help create-app prints usage"
+server-tool help create-app | grep -q 'Usage:'
+
+echo "==> help unknown command is rejected"
+if server-tool help definitely-not-a-command; then
+    echo "Expected help for unknown command to fail"
+    exit 1
+fi
+
 echo "==> create-github-runner requires arguments"
 if server-tool create-github-runner -y; then
     echo "Expected create-github-runner without arguments to fail"
@@ -33,6 +48,15 @@ server-tool init-server -y
 
 echo "==> install nginx"
 server-tool install nginx -y
+
+echo "==> check-certbot-renew"
+server-tool check-certbot-renew -y
+if systemctl cat certbot.timer >/dev/null 2>&1; then
+    systemctl is-enabled --quiet certbot.timer
+    systemctl is-active --quiet certbot.timer
+else
+    test -f /etc/cron.d/certbot
+fi
 
 echo "==> install php ${php_version}"
 server-tool install php -y "$php_version"

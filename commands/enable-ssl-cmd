@@ -134,6 +134,7 @@ cp "/etc/letsencrypt/live/${domain}/privkey.pem" "$ssl_key"
 nginx -s reload
 EOF
   chmod 750 "${hook_dir}/${username}_${app_name}.sh"
+  ensure_certbot_autorenew
 }
 
 apply_cert_permissions() {

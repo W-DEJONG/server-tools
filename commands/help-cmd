@@ -1,0 +1,42 @@
+#!/bin/bash
+set -eo pipefail
+
+# shellcheck disable=SC1091
+source "$SERVER_TOOL_ROOT/lib/help"
+
+if [ $# -eq 0 ]; then
+  list_command_help
+  exit 0
+fi
+
+cmd="$1"
+shift
+
+if [ "$cmd" = "install" ]; then
+  if [ $# -gt 1 ]; then
+    echo "Usage: server-tool help install [<package>]"
+    exit 1
+  fi
+  if [ $# -eq 1 ]; then
+    if ! is_install_package "$1"; then
+      echo "Error: Unknown package '$1'."
+      exit 1
+    fi
+    show_install_package_help "$1"
+    exit 0
+  fi
+  show_command_help install
+  exit 0
+fi
+
+if [ $# -ne 0 ]; then
+  echo "Usage: server-tool help [<command>]"
+  exit 1
+fi
+
+if ! is_known_command "$cmd"; then
+  echo "Error: Unknown Command '$cmd'."
+  exit 1
+fi
+
+show_command_help "$cmd"

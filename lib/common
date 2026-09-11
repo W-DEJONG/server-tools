@@ -1621,3 +1621,51 @@ app_backup_cron_file() {
   local app_name="$2"
   printf '/etc/cron.d/server-tool-backup-%s-%s\n' "$username" "$app_name"
 }
+
+certbot_timer_unit_exists() {
+  systemctl cat certbot.timer >/dev/null 2>&1
+}
+
+list_certbot_deploy_hooks() {
+  local hook_dir="/etc/letsencrypt/renewal-hooks/deploy"
+  local f
+  local hooks=()
+
+  if [ ! -d "$hook_dir" ]; then
+    return 0
+  fi
+
+  for f in "$hook_dir"/*; do
+    [ -f "$f" ] || continue
+    hooks+=("$(basename "$f")")
+  done
+
+  if [ ${#hooks[@]} -eq 0 ]; then
+    return 0
+  fi
+
+  echo "Deploy hooks:"
+  printf '  %s\n' "${hooks[@]}"
+}
+
+ensure_certbot_autorenew() {
+  if ! command -v certbot >/dev/null 2>&1; then
+    echo "Error: certbot is not installed. Run: server-tool install nginx"
+    exit 1
+  fi
+
+  if certbot_timer_unit_exists; then
+    if ! systemctl is-enabled --quiet certbot.timer || ! systemctl is-active --quiet certbot.timer; then
+      confirm_or_exit "Certbot auto-renew is not active. Enable certbot.timer? (y/n): "
+      systemctl enable --now certbot.timer
+    fi
+    echo "Certbot auto-renew: certbot.timer $(systemctl is-enabled certbot.timer 2>/dev/null), $(systemctl is-active certbot.timer 2>/dev/null)"
+  elif [ -f /etc/cron.d/certbot ]; then
+    echo "Certbot auto-renew: /etc/cron.d/certbot"
+  else
+    echo "Error: certbot auto-renew is not configured (no certbot.timer or /etc/cron.d/certbot)."
+    exit 1
+  fi
+
+  list_certbot_deploy_hooks
+}

@@ -7,12 +7,6 @@ export SERVER_TOOL_ROOT="$script_dir"
 # shellcheck disable=SC1091
 source "$script_dir/lib/common"
 
-# Check if at least one argument is provided
-if [ $# -lt 1 ]; then
-    more < "$script_dir/README.md"
-    exit 1
-fi
-
 ASSUME_YES=0
 filtered_args=()
 for arg in "$@"; do
@@ -27,9 +21,13 @@ for arg in "$@"; do
 done
 export ASSUME_YES
 
-if [ ${#filtered_args[@]} -eq 0 ]; then
-    more < "$script_dir/README.md"
-    exit 1
+if [ ${#filtered_args[@]} -eq 0 ] || [ "${filtered_args[0]}" = "help" ]; then
+  set -- "${filtered_args[@]}"
+  if [ "${1:-}" = "help" ]; then
+    shift
+  fi
+  source "$script_dir/commands/help-cmd" "$@"
+  exit
 fi
 set -- "${filtered_args[@]}"
 

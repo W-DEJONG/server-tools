@@ -11,6 +11,13 @@ Usage:
 # Basic command
 server-tool <command> [-y]
 
+# Command help (no root required)
+server-tool
+server-tool help
+server-tool help <command>
+server-tool help install
+server-tool help install <package>
+
 # Skip confirmation prompts
 server-tool <command> -y
 
@@ -65,6 +72,7 @@ server-tool delete-app <username> <application> [-y]
 server-tool rename-app <username> <application> <new_name> [--keep-domain] [-y]
 server-tool switch-php <username> <application> [-p <php-version>] [-y]
 server-tool enable-ssl <username> <application> [-d <domain>] [-e <email>] [--self-signed] [--renew] [-y]
+server-tool check-certbot-renew [-y]
 server-tool enable-basic-auth <username> <application> <auth_user> [-r <realm>] [--except <path>] [-y]
 server-tool enable-basic-auth testdev demo tester -r Staging --except /webhooks --except /up -y
 server-tool disable-ssh-password [-y]
