@@ -28,5 +28,7 @@ for version in "${SELECTED_VERSIONS[@]}"; do
         php${version}-zip \
         php${version}-memcached \
         php${version}-redis \
-        php${version}-xml
+        php${version}-xml \
+        php${version}-gmp \
+        php${version}-mongodb
 done
