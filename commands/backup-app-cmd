@@ -38,6 +38,13 @@ username="${positionals[0]}"
 app_name="${positionals[1]}"
 require_application "$username" "$app_name"
 cron_file="$(app_backup_cron_file "$username" "$app_name")"
+legacy_cron_file="/etc/cron.d/server-tool-backup-${username}-${app_name}"
+
+remove_legacy_backup_cron_file() {
+  if [ "$legacy_cron_file" != "$cron_file" ] && [ -f "$legacy_cron_file" ]; then
+    rm -f "$legacy_cron_file"
+  fi
+}
 
 if [ "$enable_backup" -eq 1 ]; then
   echo "Username: $username"
@@ -58,6 +65,7 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 0 3 * * * root $server_tool_bin backup-app $username $app_name -y
 EOF
   chmod 644 "$cron_file"
+  remove_legacy_backup_cron_file
 
   echo
   echo "Daily backup cron enabled for $username/$app_name."
@@ -72,8 +80,17 @@ if [ "$disable_backup" -eq 1 ]; then
   echo "Cron file: $cron_file"
   confirm_or_exit "This will disable the daily backup cron for $username/$app_name. Do you want to proceed? (y/n): "
 
+  removed=0
   if [ -f "$cron_file" ]; then
     rm -f "$cron_file"
+    removed=1
+  fi
+  if [ "$legacy_cron_file" != "$cron_file" ] && [ -f "$legacy_cron_file" ]; then
+    rm -f "$legacy_cron_file"
+    removed=1
+  fi
+
+  if [ "$removed" -eq 1 ]; then
     echo
     echo "Daily backup cron disabled for $username/$app_name."
   else

@@ -458,6 +458,13 @@ if server-tool test-backup -y; then
     exit 1
 fi
 
+echo "==> cron.d backup filenames are sanitized"
+# shellcheck disable=SC1091
+. "$repo_dir/lib/common"
+[[ "$(app_backup_cron_file testdev demo)" == "/etc/cron.d/server-tool-backup-testdev-demo" ]]
+[[ "$(app_backup_cron_file test_dev my.app)" == "/etc/cron.d/server-tool-backup-test-dev-my-app" ]]
+[[ "$(app_backup_cron_file 'test__dev' '.my.app.')" == "/etc/cron.d/server-tool-backup-test-dev-my-app" ]]
+
 echo "==> backup-app testdev demo --enable"
 server-tool backup-app testdev demo --enable -y
 test -f /etc/cron.d/server-tool-backup-testdev-demo
