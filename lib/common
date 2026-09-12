@@ -1289,6 +1289,177 @@ reload_supervisor() {
   fi
 }
 
+require_supervisor() {
+  ensure_supervisor_app_includes
+
+  if ! command -v supervisorctl >/dev/null 2>&1; then
+    echo "Error: supervisorctl is not installed."
+    exit 1
+  fi
+
+  if ! systemctl is-active --quiet supervisor && ! systemctl is-active --quiet supervisord; then
+    if systemctl cat supervisor.service >/dev/null 2>&1; then
+      systemctl enable --now supervisor
+    elif systemctl cat supervisord.service >/dev/null 2>&1; then
+      systemctl enable --now supervisord
+    else
+      echo "Error: Supervisor is not running."
+      exit 1
+    fi
+  fi
+
+  if ! supervisorctl status >/dev/null 2>&1; then
+    echo "Error: cannot talk to the Supervisor daemon."
+    exit 1
+  fi
+}
+
+set_supervisor_program_autostart() {
+  local conf="$1"
+  local enabled="$2"
+
+  if [ ! -f "$conf" ]; then
+    echo "Error: supervisor config not found: $conf"
+    exit 1
+  fi
+
+  if grep -qE '^[[:space:]]*autostart[[:space:]]*=' "$conf"; then
+    sed -i 's|^[[:space:]]*autostart[[:space:]]*=.*|autostart='"$enabled"'|' "$conf"
+  else
+    printf 'autostart=%s\n' "$enabled" >> "$conf"
+  fi
+
+  if [ "$enabled" = "true" ]; then
+    if grep -qE '^[[:space:]]*autorestart[[:space:]]*=' "$conf"; then
+      sed -i 's|^[[:space:]]*autorestart[[:space:]]*=.*|autorestart=true|' "$conf"
+    else
+      printf 'autorestart=true\n' >> "$conf"
+    fi
+  fi
+}
+
+app_supervisor_conf() {
+  local kind="$1"
+  local app_root="$2"
+  printf '%s/supervisor/%s.conf\n' "$app_root" "$kind"
+}
+
+app_supervisor_program_name() {
+  local kind="$1"
+  local username="$2"
+  local app_name="$3"
+  printf '%s-%s-%s\n' "$kind" "$username" "$app_name"
+}
+
+supervisor_ctl_group() {
+  local action="$1"
+  local program="$2"
+  local output=""
+  local status=0
+
+  output="$(supervisorctl "$action" "${program}:*" 2>&1)" || status=$?
+  if echo "$output" | grep -qi 'no such process'; then
+    status=0
+    output="$(supervisorctl "$action" "$program" 2>&1)" || status=$?
+  fi
+  printf '%s\n' "$output"
+
+  if [ "$status" -eq 0 ]; then
+    return 0
+  fi
+
+  case "$action" in
+    start|restart)
+      if echo "$output" | grep -qiE 'already started|spawn error'; then
+        return 0
+      fi
+      ;;
+    stop)
+      if echo "$output" | grep -qiE 'not running|no such process'; then
+        return 0
+      fi
+      ;;
+  esac
+
+  return "$status"
+}
+
+control_app_supervisor_program() {
+  local action="$1"
+  local kind="$2"
+  local username="$3"
+  local app_name="$4"
+  local restart=0
+  local disable=0
+  local label
+  local conf
+  local program
+
+  shift 4
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --restart)
+        restart=1
+        shift
+        ;;
+      --disable)
+        disable=1
+        shift
+        ;;
+      *)
+        echo "Error: unknown option '$1'"
+        exit 1
+        ;;
+    esac
+  done
+
+  case "$kind" in
+    horizon) label="Horizon" ;;
+    queue) label="queue worker" ;;
+    *)
+      echo "Error: unknown supervisor kind '$kind'"
+      exit 1
+      ;;
+  esac
+
+  require_application "$username" "$app_name"
+
+  conf="$(app_supervisor_conf "$kind" "$APP_ROOT")"
+  program="$(app_supervisor_program_name "$kind" "$username" "$app_name")"
+
+  if [ ! -f "$conf" ]; then
+    echo "Error: $label is not configured for $username/$app_name."
+    echo "Run: server-tool create-${kind} $username $app_name"
+    exit 1
+  fi
+
+  require_supervisor
+  ensure_app_supervisor "$username" "$app_name" "$APP_ROOT"
+
+  case "$action" in
+    start)
+      set_supervisor_program_autostart "$conf" true
+      reload_supervisor
+      if [ "$restart" -eq 1 ]; then
+        supervisor_ctl_group restart "$program"
+      else
+        supervisor_ctl_group start "$program"
+      fi
+      ;;
+    stop)
+      if [ "$disable" -eq 1 ]; then
+        set_supervisor_program_autostart "$conf" false
+        reload_supervisor
+      fi
+      supervisor_ctl_group stop "$program"
+      ;;
+    *)
+      echo "Error: unknown supervisor action '$action'"
+      exit 1
+      ;;
+  esac
+}
+
 ensure_cron() {
   if ! command -v crontab >/dev/null 2>&1; then
     apt-get -y install cron

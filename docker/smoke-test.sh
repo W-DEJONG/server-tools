@@ -27,9 +27,26 @@ server-tool | grep -q create-app
 
 echo "==> help lists commands"
 server-tool help | grep -q create-app
+server-tool help | grep -q start-horizon
+server-tool help | grep -q start-queue
+server-tool help | grep -q stop-horizon
+server-tool help | grep -q stop-queue
+
+echo "==> help lists app-structure topic"
+server-tool help | grep -q app-structure
 
 echo "==> help create-app prints usage"
 server-tool help create-app | grep -q 'Usage:'
+
+echo "==> help start-queue documents --restart"
+server-tool help start-queue | grep -q -- '--restart'
+
+echo "==> help stop-queue documents --disable"
+server-tool help stop-queue | grep -q -- '--disable'
+
+echo "==> help app-structure describes the application layout"
+server-tool help app-structure | grep -q '/home/<username>/<application>/'
+server-tool help app-structure | grep -q 'current'
 
 echo "==> help unknown command is rejected"
 if server-tool help definitely-not-a-command; then
@@ -267,6 +284,18 @@ echo "==> delete-app testdev mysqlapp"
 server-tool delete-app testdev mysqlapp -y
 test ! -e /home/testdev/mysqlapp
 
+echo "==> start-horizon without config fails"
+if server-tool start-horizon testdev demo -y; then
+    echo "Expected start-horizon without config to fail"
+    exit 1
+fi
+
+echo "==> stop-queue without config fails"
+if server-tool stop-queue testdev demo -y; then
+    echo "Expected stop-queue without config to fail"
+    exit 1
+fi
+
 echo "==> create-horizon testdev demo"
 server-tool create-horizon testdev demo -y
 test -f /home/testdev/demo/supervisor/horizon.conf
@@ -281,6 +310,42 @@ grep -q "php${php_version} artisan queue:work --sleep=3 --tries=3 --timeout=60 -
 grep -q "directory=/home/testdev/demo/current/" /home/testdev/demo/supervisor/queue.conf
 grep -q "program:queue-testdev-demo" /home/testdev/demo/supervisor/queue.conf
 grep -q "stopwaitsecs=3600" /home/testdev/demo/supervisor/queue.conf
+
+echo "==> stop-horizon testdev demo"
+server-tool stop-horizon testdev demo -y
+grep -q '^autostart=true' /home/testdev/demo/supervisor/horizon.conf
+
+echo "==> start-horizon testdev demo"
+server-tool start-horizon testdev demo -y
+grep -q '^autostart=true' /home/testdev/demo/supervisor/horizon.conf
+grep -q '^autorestart=true' /home/testdev/demo/supervisor/horizon.conf
+
+echo "==> start-horizon testdev demo again"
+server-tool start-horizon testdev demo -y
+
+echo "==> start-horizon testdev demo --restart"
+server-tool start-horizon testdev demo --restart -y
+
+echo "==> stop-queue testdev demo --disable"
+server-tool stop-queue testdev demo --disable -y
+grep -q '^autostart=false' /home/testdev/demo/supervisor/queue.conf
+
+echo "==> start-queue testdev demo"
+server-tool start-queue testdev demo -y
+grep -q '^autostart=true' /home/testdev/demo/supervisor/queue.conf
+grep -q '^autorestart=true' /home/testdev/demo/supervisor/queue.conf
+
+echo "==> start-queue testdev demo --restart"
+server-tool start-queue testdev demo --restart -y
+
+echo "==> stop-horizon testdev demo --disable"
+server-tool stop-horizon testdev demo --disable -y
+grep -q '^autostart=false' /home/testdev/demo/supervisor/horizon.conf
+
+echo "==> start-horizon testdev demo re-enables autostart"
+server-tool start-horizon testdev demo -y
+grep -q '^autostart=true' /home/testdev/demo/supervisor/horizon.conf
+grep -q '^autorestart=true' /home/testdev/demo/supervisor/horizon.conf
 
 echo "==> enable-basic-auth testdev demo tester"
 server-tool enable-basic-auth testdev demo tester -r Staging -y

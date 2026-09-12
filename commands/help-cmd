@@ -29,6 +29,15 @@ if [ "$cmd" = "install" ]; then
   exit 0
 fi
 
+if is_help_topic "$cmd"; then
+  if [ $# -ne 0 ]; then
+    echo "Usage: server-tool help $cmd"
+    exit 1
+  fi
+  show_help_topic "$cmd"
+  exit 0
+fi
+
 if [ $# -ne 0 ]; then
   echo "Usage: server-tool help [<command>]"
   exit 1

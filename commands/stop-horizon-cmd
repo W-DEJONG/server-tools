@@ -1,0 +1,50 @@
+#!/bin/bash
+set -eo pipefail
+
+disable=0
+positionals=()
+usage="Usage: server-tool stop-horizon <username> <application> [--disable] [-y]"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --disable)
+      disable=1
+      shift
+      ;;
+    *)
+      positionals+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ ${#positionals[@]} -ne 2 ]; then
+  echo "$usage"
+  exit 1
+fi
+
+username="${positionals[0]}"
+app_name="${positionals[1]}"
+require_application "$username" "$app_name"
+
+echo "Username: $username"
+echo "Application: $app_name"
+echo "Program: horizon-${username}-${app_name}"
+if [ "$disable" -eq 1 ]; then
+  echo "Disable autostart: yes"
+fi
+confirm_or_exit "This will stop Horizon for $username/$app_name. Do you want to proceed? (y/n): "
+
+if [ "$disable" -eq 1 ]; then
+  control_app_supervisor_program stop horizon "$username" "$app_name" --disable
+else
+  control_app_supervisor_program stop horizon "$username" "$app_name"
+fi
+
+echo
+echo "Horizon stopped for $username/$app_name."
+echo "  Program:   horizon-${username}-${app_name}"
+if [ "$disable" -eq 1 ]; then
+  echo "  Autostart: off"
+else
+  echo "  Autostart: unchanged"
+fi

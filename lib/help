@@ -8,6 +8,13 @@ is_install_package() {
   [ -e "$SERVER_TOOL_ROOT/packages/install-$1" ]
 }
 
+is_help_topic() {
+  case "$1" in
+    app-structure) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 package_accepts_args() {
   case "$1" in
     php|npm|postgresql|aws|composer) return 0 ;;
@@ -46,7 +53,7 @@ command_summary() {
     enable-basic-auth) echo "Enable HTTP basic authentication on an application" ;;
     enable-scheduler) echo "Enable the Laravel scheduler cron job for an application" ;;
     enable-ssl) echo "Enable HTTPS with Let's Encrypt or a self-signed certificate" ;;
-    help) echo "Show detailed help for a command" ;;
+    help) echo "Show detailed help for a command or topic" ;;
     init-server) echo "Configure a new Debian server with default packages and settings" ;;
     install) echo "Install one or more application packages" ;;
     list-apps) echo "List installed applications as username application" ;;
@@ -56,6 +63,10 @@ command_summary() {
     restore-db) echo "Restore an application's database from a dump file" ;;
     self-install) echo "Install the server-tool symlink into /usr/local/bin" ;;
     self-update) echo "Update server-tools from git" ;;
+    start-horizon) echo "Start an application's Laravel Horizon Supervisor program" ;;
+    start-queue) echo "Start an application's Laravel queue Supervisor program" ;;
+    stop-horizon) echo "Stop an application's Laravel Horizon Supervisor program" ;;
+    stop-queue) echo "Stop an application's Laravel queue Supervisor program" ;;
     switch-php) echo "Switch an application to another PHP version" ;;
     test-backup) echo "Upload a small test object to verify S3 backup config" ;;
     *) echo "No summary available" ;;
@@ -65,6 +76,7 @@ command_summary() {
 list_command_help() {
   local f name
   echo "Usage: server-tool help <command>"
+  echo "       server-tool help <topic>"
   echo
   echo "Available commands:"
   for f in "$SERVER_TOOL_ROOT/commands/"*-cmd; do
@@ -74,7 +86,95 @@ list_command_help() {
     printf '  %-22s %s\n' "$name" "$(command_summary "$name")"
   done
   echo
+  echo "Topics:"
+  printf '  %-22s %s\n' "app-structure" "Application folder layout and related config files"
+  echo
   echo "Use: server-tool help <command>"
+  echo "     server-tool help app-structure"
+}
+
+show_help_topic() {
+  case "$1" in
+    app-structure)
+      cat <<'EOF'
+app-structure
+
+Application folder layout created by create-app, and the system files
+that point into it.
+
+An application lives at /home/<username>/<application>/ and is detected
+by list-apps when nginx/<application>.conf exists.
+
+Folder layout
+-------------
+/home/<username>/<application>/
+  current                 Symlink to the active release (starts as install)
+  install/                Placeholder release with public/index.php (phpinfo)
+  releases/               Deployed releases (nginx can read this tree)
+  nginx/
+    <application>.conf    Nginx vhost (root is current/public)
+    ssl/                  Certificates written by enable-ssl
+    auth.inc              Included by the vhost (basic auth, if enabled)
+  php-fpm/
+    <application>.conf    PHP-FPM pool for this application
+  cron/                   One job file per crontab snippet (dotfiles skipped)
+  supervisor/             Supervisor programs (horizon, queue, ...)
+  log/                    Nginx access/error logs and worker logs
+  .env.db                 Database credentials (only when create-app -d created a new DB)
+
+Optional files after other commands:
+  nginx/.htpasswd         HTTP basic auth users (enable-basic-auth)
+  nginx/auth-map.conf     Paths that skip basic auth (--except)
+  nginx/auth-except       Stored --except paths
+  cron/scheduler          Laravel schedule:run (enable-scheduler)
+  supervisor/horizon.conf Laravel Horizon (create-horizon)
+  supervisor/queue.conf   Laravel queue worker (create-queue)
+
+System files
+------------
+/etc/nginx/conf.d/<username>_<application>.conf
+    include /home/<username>/<application>/nginx/*.conf;
+
+/etc/php/<version>/fpm/pool.d/<username>_<application>.conf
+    include=/home/<username>/<application>/php-fpm/<application>.conf
+
+/run/php/php<version>-fpm-<username>-<application>.sock
+    PHP-FPM listen socket used by nginx
+
+/etc/supervisor/conf.d/<username>_<application>.d
+    Symlink to the application's supervisor/ directory
+
+/etc/cron.d/server-tool-backup-<username>-<application>
+    Daily S3 backup (backup-app --enable). The filename is sanitized to
+    letters, digits, and hyphens so cron does not ignore it.
+
+User crontab
+------------
+apply-cron, enable-scheduler, and disable-scheduler write a block in the
+application user's crontab:
+
+  # BEGIN server-tool app: <username>/<application>
+  ...jobs from cron/*...
+  # END server-tool app: <username>/<application>
+
+Permissions
+-----------
+The tree is owned by <username>. Nginx is given execute on the home and
+application directories, read on install/releases, and write on log/.
+
+See also
+--------
+  server-tool help create-app
+  server-tool help apply-cron
+  server-tool help enable-scheduler
+  server-tool help backup-app
+EOF
+      ;;
+    *)
+      echo "Error: Unknown topic '$1'."
+      return 1
+      ;;
+  esac
 }
 
 show_command_help() {
@@ -181,6 +281,9 @@ Examples:
   server-tool create-app testdev demo -d mijnapp -t mysql -y
   server-tool create-app testdev demo -d mijnapp -t mysql --host db.internal --admin-user root -y
   server-tool create-app testdev demo -d mijnapp -t pgsql --host db.internal --admin-user postgres -y
+
+See also:
+  server-tool help app-structure
 EOF
       ;;
     create-db)
@@ -260,6 +363,10 @@ Options:
 Examples:
   server-tool create-horizon testdev demo -y
   server-tool create-horizon testdev demo -p 8.4 -n 2 -y
+
+See also:
+  server-tool help start-horizon
+  server-tool help stop-horizon
 EOF
       ;;
     create-queue)
@@ -288,6 +395,10 @@ Options:
 Examples:
   server-tool create-queue testdev demo -y
   server-tool create-queue testdev demo -q emails -c redis --tries 5 -y
+
+See also:
+  server-tool help start-queue
+  server-tool help stop-queue
 EOF
       ;;
     create-sudo-user)
@@ -552,13 +663,15 @@ EOF
       cat <<'EOF'
 help
 
-Show detailed help for a command.
+Show detailed help for a command or topic.
 
-Does not require root. With no command, lists all available commands.
+Does not require root. With no command, lists all available commands
+and topics.
 
 Usage:
   server-tool help [<command>]
   server-tool help install [<package>]
+  server-tool help app-structure
 
 Arguments:
   command        Command name (see server-tool help)
@@ -567,6 +680,7 @@ Arguments:
 Examples:
   server-tool help
   server-tool help create-app
+  server-tool help app-structure
   server-tool help install
   server-tool help install php
 EOF
@@ -727,6 +841,108 @@ Usage:
 
 Examples:
   server-tool self-update
+EOF
+      ;;
+    start-horizon)
+      cat <<'EOF'
+start-horizon
+
+Start an application's Laravel Horizon Supervisor program.
+
+Re-enables autostart and autorestart so Horizon comes back after a reboot.
+Without --restart, a running program is left running. With --restart, the
+program is restarted.
+
+Usage:
+  server-tool start-horizon <username> <application> [--restart] [-y]
+
+Arguments:
+  username       Linux user that owns the application
+  application    Application folder under /home/<username>/
+
+Options:
+  --restart      Restart Horizon if it is already running
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool start-horizon testdev demo -y
+  server-tool start-horizon testdev demo --restart -y
+EOF
+      ;;
+    start-queue)
+      cat <<'EOF'
+start-queue
+
+Start an application's Laravel queue Supervisor program.
+
+Re-enables autostart and autorestart so the worker comes back after a reboot.
+Without --restart, a running program is left running. With --restart, the
+program is restarted.
+
+Usage:
+  server-tool start-queue <username> <application> [--restart] [-y]
+
+Arguments:
+  username       Linux user that owns the application
+  application    Application folder under /home/<username>/
+
+Options:
+  --restart      Restart the queue worker if it is already running
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool start-queue testdev demo -y
+  server-tool start-queue testdev demo --restart -y
+EOF
+      ;;
+    stop-horizon)
+      cat <<'EOF'
+stop-horizon
+
+Stop an application's Laravel Horizon Supervisor program.
+
+Without --disable, autostart is left unchanged so a reboot starts Horizon
+again. With --disable, autostart is turned off until start-horizon runs.
+
+Usage:
+  server-tool stop-horizon <username> <application> [--disable] [-y]
+
+Arguments:
+  username       Linux user that owns the application
+  application    Application folder under /home/<username>/
+
+Options:
+  --disable      Turn off autostart so a reboot does not start Horizon
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool stop-horizon testdev demo -y
+  server-tool stop-horizon testdev demo --disable -y
+EOF
+      ;;
+    stop-queue)
+      cat <<'EOF'
+stop-queue
+
+Stop an application's Laravel queue Supervisor program.
+
+Without --disable, autostart is left unchanged so a reboot starts the
+worker again. With --disable, autostart is turned off until start-queue runs.
+
+Usage:
+  server-tool stop-queue <username> <application> [--disable] [-y]
+
+Arguments:
+  username       Linux user that owns the application
+  application    Application folder under /home/<username>/
+
+Options:
+  --disable      Turn off autostart so a reboot does not start the worker
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool stop-queue testdev demo -y
+  server-tool stop-queue testdev demo --disable -y
 EOF
       ;;
     switch-php)

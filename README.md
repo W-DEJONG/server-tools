@@ -15,6 +15,7 @@ server-tool <command> [-y]
 server-tool
 server-tool help
 server-tool help <command>
+server-tool help app-structure
 server-tool help install
 server-tool help install <package>
 
@@ -80,7 +81,11 @@ server-tool enable-basic-auth <username> <application> <auth_user> [-r <realm>] 
 server-tool enable-basic-auth testdev demo tester -r Staging --except /webhooks --except /up -y
 server-tool disable-ssh-password [-y]
 server-tool create-horizon <username> <application> [-p <php-version>] [-n <numprocs>] [-y]
+server-tool start-horizon <username> <application> [--restart] [-y]
+server-tool stop-horizon <username> <application> [--disable] [-y]
 server-tool create-queue <username> <application> [-p <php-version>] [-n <numprocs>] [-q <queue>] [-c <connection>] [--tries <n>] [--timeout <seconds>] [--sleep <seconds>] [-y]
+server-tool start-queue <username> <application> [--restart] [-y]
+server-tool stop-queue <username> <application> [--disable] [-y]
 server-tool apply-cron <username> <application> [-y]
 server-tool enable-scheduler <username> <application> [-p <php-version>] [-y]
 server-tool disable-scheduler <username> <application> [-y]

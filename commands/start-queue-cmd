@@ -1,0 +1,46 @@
+#!/bin/bash
+set -eo pipefail
+
+restart=0
+positionals=()
+usage="Usage: server-tool start-queue <username> <application> [--restart] [-y]"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --restart)
+      restart=1
+      shift
+      ;;
+    *)
+      positionals+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ ${#positionals[@]} -ne 2 ]; then
+  echo "$usage"
+  exit 1
+fi
+
+username="${positionals[0]}"
+app_name="${positionals[1]}"
+require_application "$username" "$app_name"
+
+echo "Username: $username"
+echo "Application: $app_name"
+echo "Program: queue-${username}-${app_name}"
+if [ "$restart" -eq 1 ]; then
+  echo "Restart: yes"
+fi
+confirm_or_exit "This will start the queue worker for $username/$app_name. Do you want to proceed? (y/n): "
+
+if [ "$restart" -eq 1 ]; then
+  control_app_supervisor_program start queue "$username" "$app_name" --restart
+else
+  control_app_supervisor_program start queue "$username" "$app_name"
+fi
+
+echo
+echo "Queue worker started for $username/$app_name."
+echo "  Program:   queue-${username}-${app_name}"
+echo "  Autostart: on"
