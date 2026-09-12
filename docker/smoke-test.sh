@@ -31,6 +31,9 @@ server-tool help | grep -q start-horizon
 server-tool help | grep -q start-queue
 server-tool help | grep -q stop-horizon
 server-tool help | grep -q stop-queue
+server-tool help | grep -q list-horizons
+server-tool help | grep -q list-queues
+server-tool help | grep -q list-jobs
 
 echo "==> help lists app-structure topic"
 server-tool help | grep -q app-structure
@@ -347,6 +350,28 @@ server-tool start-horizon testdev demo -y
 grep -q '^autostart=true' /home/testdev/demo/supervisor/horizon.conf
 grep -q '^autorestart=true' /home/testdev/demo/supervisor/horizon.conf
 
+echo "==> list-horizons testdev demo"
+server-tool list-horizons | grep -qx 'testdev demo horizon-testdev-demo'
+server-tool list-horizons testdev | grep -qx 'testdev demo horizon-testdev-demo'
+server-tool list-horizons testdev demo | grep -qx 'testdev demo horizon-testdev-demo'
+
+echo "==> list-queues testdev demo"
+server-tool list-queues | grep -qx 'testdev demo queue-testdev-demo'
+server-tool list-queues testdev | grep -qx 'testdev demo queue-testdev-demo'
+server-tool list-queues testdev demo | grep -qx 'testdev demo queue-testdev-demo'
+
+echo "==> list-jobs testdev demo"
+server-tool list-jobs | grep -qx 'testdev demo horizon-testdev-demo'
+server-tool list-jobs | grep -qx 'testdev demo queue-testdev-demo'
+server-tool list-jobs testdev | grep -qx 'testdev demo horizon-testdev-demo'
+server-tool list-jobs testdev demo | grep -qx 'testdev demo queue-testdev-demo'
+
+echo "==> list-horizons unknown user fails"
+if server-tool list-horizons definitely-not-a-user; then
+    echo "Expected list-horizons for unknown user to fail"
+    exit 1
+fi
+
 echo "==> enable-basic-auth testdev demo tester"
 server-tool enable-basic-auth testdev demo tester -r Staging -y
 grep -q 'auth_basic "Staging"' /home/testdev/demo/nginx/auth.inc
@@ -449,6 +474,10 @@ test -L /etc/supervisor/conf.d/testdev_demo2.d
 grep -q "program:horizon-testdev-demo2" /home/testdev/demo2/supervisor/horizon.conf
 grep -q "directory=/home/testdev/demo2/current/" /home/testdev/demo2/supervisor/horizon.conf
 grep -q "program:queue-testdev-demo2" /home/testdev/demo2/supervisor/queue.conf
+server-tool list-horizons testdev demo2 | grep -qx 'testdev demo2 horizon-testdev-demo2'
+server-tool list-queues testdev demo2 | grep -qx 'testdev demo2 queue-testdev-demo2'
+server-tool list-jobs testdev | grep -qx 'testdev demo2 horizon-testdev-demo2'
+server-tool list-jobs testdev | grep -qx 'testdev demo2 queue-testdev-demo2'
 grep -q "directory=/home/testdev/demo2/current/" /home/testdev/demo2/supervisor/queue.conf
 grep -q "stdout_logfile=/home/testdev/demo2/log/queue.log" /home/testdev/demo2/supervisor/queue.conf
 grep -q "cd /home/testdev/demo2/current && php${php_version} artisan schedule:run" /home/testdev/demo2/cron/scheduler

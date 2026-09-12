@@ -1460,6 +1460,116 @@ control_app_supervisor_program() {
   esac
 }
 
+collect_supervisor_program_names() {
+  local conf="$1"
+  sed -n 's/^\[program:\([^]]*\)]/\1/p' "$conf"
+}
+
+print_app_supervisor_jobs() {
+  local kind="$1"
+  local username="$2"
+  local app_name="$3"
+  local app_dir="$4"
+  local conf
+  local program
+
+  conf="$(app_supervisor_conf "$kind" "$app_dir")"
+  [ -f "$conf" ] || return 0
+
+  while IFS= read -r program; do
+    [ -n "$program" ] || continue
+    printf '%s %s %s\n' "$username" "$app_name" "$program"
+  done < <(collect_supervisor_program_names "$conf")
+}
+
+scan_user_app_supervisor_jobs() {
+  local kind="$1"
+  local username="$2"
+  local user_home="/home/${username}"
+  local app_dir
+  local app_name
+
+  [ -d "$user_home" ] || return 0
+
+  for app_dir in "$user_home"/*; do
+    [ -d "$app_dir" ] || continue
+    app_name="$(basename "$app_dir")"
+
+    case "$app_name" in
+      ""|*/*|.|..|.ssh)
+        continue
+        ;;
+    esac
+
+    [ -f "${app_dir}/nginx/${app_name}.conf" ] || continue
+    print_app_supervisor_jobs "$kind" "$username" "$app_name" "$app_dir"
+  done
+}
+
+require_list_supervisor_user() {
+  local username="$1"
+
+  case "$username" in
+    ""|*/*|root|admin|www-data|nginx|nobody|daemon)
+      echo "Error: refusing to list applications for user '$username'"
+      exit 1
+      ;;
+  esac
+
+  if ! id "$username" &>/dev/null; then
+    echo "Error: user '$username' not found."
+    exit 1
+  fi
+}
+
+list_app_supervisor_jobs() {
+  local kind="$1"
+  local filter_user="${2:-}"
+  local filter_app="${3:-}"
+  local user_home
+  local username
+
+  case "$kind" in
+    horizon|queue) ;;
+    *)
+      echo "Error: unknown supervisor kind '$kind'"
+      exit 1
+      ;;
+  esac
+
+  if [ -n "$filter_app" ]; then
+    require_application "$filter_user" "$filter_app"
+  elif [ -n "$filter_user" ]; then
+    require_list_supervisor_user "$filter_user"
+  fi
+
+  if [ -n "$filter_app" ]; then
+    print_app_supervisor_jobs "$kind" "$filter_user" "$filter_app" "$APP_ROOT"
+  elif [ -n "$filter_user" ]; then
+    scan_user_app_supervisor_jobs "$kind" "$filter_user"
+  elif [ -d /home ]; then
+    for user_home in /home/*; do
+      [ -d "$user_home" ] || continue
+      username="$(basename "$user_home")"
+      case "$username" in
+        ""|*/*|root|admin|www-data|nginx|nobody|daemon)
+          continue
+          ;;
+      esac
+      scan_user_app_supervisor_jobs "$kind" "$username"
+    done
+  fi | sort
+}
+
+list_app_supervisor_jobs_both() {
+  local filter_user="${1:-}"
+  local filter_app="${2:-}"
+  {
+    list_app_supervisor_jobs horizon "$filter_user" "$filter_app"
+    list_app_supervisor_jobs queue "$filter_user" "$filter_app"
+  } | sort
+}
+
 ensure_cron() {
   if ! command -v crontab >/dev/null 2>&1; then
     apt-get -y install cron

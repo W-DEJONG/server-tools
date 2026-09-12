@@ -1,0 +1,10 @@
+#!/bin/bash
+set -eo pipefail
+
+usage="Usage: server-tool list-horizons [<username> [<application>]]"
+if [ $# -gt 2 ]; then
+  echo "$usage"
+  exit 1
+fi
+
+list_app_supervisor_jobs horizon "${1:-}" "${2:-}"
