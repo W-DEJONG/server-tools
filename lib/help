@@ -66,6 +66,7 @@ command_summary() {
     restore-db) echo "Restore an application's database from a dump file" ;;
     self-install) echo "Install the server-tool symlink into /usr/local/bin" ;;
     self-update) echo "Update server-tools from git" ;;
+    show-ssh-key) echo "Print an application user's private SSH key as base64" ;;
     start-horizon) echo "Start an application's Laravel Horizon Supervisor program" ;;
     start-queue) echo "Start an application's Laravel queue Supervisor program" ;;
     stop-horizon) echo "Stop an application's Laravel Horizon Supervisor program" ;;
@@ -913,6 +914,25 @@ Usage:
 
 Examples:
   server-tool self-update
+EOF
+      ;;
+    show-ssh-key)
+      cat <<'EOF'
+show-ssh-key
+
+Print an application user's private SSH key as base64.
+
+Reads /home/<username>/.ssh/<username>, the key file created by create-user.
+
+Usage:
+  server-tool show-ssh-key <username>
+
+Arguments:
+  username       Linux application user that owns the key
+
+Examples:
+  server-tool show-ssh-key testdev
+  server-tool show-ssh-key testdev | base64 -d
 EOF
       ;;
     start-horizon)

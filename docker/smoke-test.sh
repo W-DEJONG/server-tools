@@ -27,6 +27,7 @@ server-tool | grep -q create-app
 
 echo "==> help lists commands"
 server-tool help | grep -q create-app
+server-tool help | grep -q show-ssh-key
 server-tool help | grep -q start-horizon
 server-tool help | grep -q start-queue
 server-tool help | grep -q stop-horizon
@@ -167,6 +168,26 @@ grep -qxF "$(cat /tmp/smokenopass.pub)" /home/smokenopass/.ssh/authorized_keys
 echo "==> create-user testdev ${php_version}"
 server-tool create-user testdev -y -p "$php_version"
 id -nG testdev | grep -qw nginx
+test -s /home/testdev/.ssh/testdev
+
+echo "==> show-ssh-key testdev"
+server-tool help show-ssh-key | grep -q 'Usage:'
+decoded="$(mktemp)"
+server-tool show-ssh-key testdev | base64 -d > "$decoded"
+cmp -s "$decoded" /home/testdev/.ssh/testdev
+rm -f "$decoded"
+if server-tool show-ssh-key; then
+    echo "Expected show-ssh-key without a username to fail"
+    exit 1
+fi
+if server-tool show-ssh-key root; then
+    echo "Expected show-ssh-key root to fail"
+    exit 1
+fi
+if server-tool show-ssh-key smokeadmin; then
+    echo "Expected show-ssh-key smokeadmin to fail without a named private key"
+    exit 1
+fi
 grep -qxF "export LS_OPTIONS='--color=auto'" /home/testdev/.bashrc
 grep -qxF "alias ls='ls \$LS_OPTIONS'" /home/testdev/.bashrc
 grep -qxF "alias ll='ls \$LS_OPTIONS -l'" /home/testdev/.bashrc
