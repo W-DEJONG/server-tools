@@ -1,0 +1,30 @@
+#!/bin/bash
+set -eo pipefail
+
+usage="Usage: server-tool show-ssh-key <username>"
+if [ $# -ne 1 ]; then
+  echo "$usage"
+  exit 1
+fi
+
+username="$1"
+
+case "$username" in
+  ""|*/*|root|admin|www-data|nginx|nobody|daemon)
+    echo "Error: refusing to show an SSH key for user '$username'"
+    exit 1
+    ;;
+esac
+
+if ! id "$username" &>/dev/null; then
+  echo "Error: user '$username' not found."
+  exit 1
+fi
+
+key_file="/home/${username}/.ssh/${username}"
+if [ ! -f "$key_file" ]; then
+  echo "Error: private SSH key '$key_file' not found."
+  exit 1
+fi
+
+base64 "$key_file"
