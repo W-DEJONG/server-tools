@@ -84,6 +84,11 @@ if [ -z "$runner_name" ]; then
   runner_name="$(hostname -s)"
 fi
 
+if ! [[ "$runner_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+  echo "Error: runner name must start with a letter or number and may only contain letters, numbers, dots, underscores and hyphens."
+  exit 1
+fi
+
 echo "GitHub URL: $github_url"
 echo "Runner name: $runner_name"
 echo "Linux user: $username"
@@ -107,6 +112,43 @@ if [ -z "$user_home" ] || [ ! -d "$user_home" ]; then
   exit 1
 fi
 
+runner_config_value() {
+  local config_file="$1"
+  local field="$2"
+  sed -n "s/^[[:space:]]*\"${field}\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$config_file"
+}
+
+legacy_runner_dir="$user_home/actions-runner"
+runner_dir="$legacy_runner_dir"
+if [ -f "$legacy_runner_dir/.runner" ]; then
+  legacy_runner_name="$(runner_config_value "$legacy_runner_dir/.runner" "agentName")"
+  if [ -z "$legacy_runner_name" ]; then
+    echo "Error: could not determine the runner name from $legacy_runner_dir/.runner."
+    exit 1
+  fi
+  if [ "$legacy_runner_name" != "$runner_name" ]; then
+    runner_dir="$user_home/actions-runners/$runner_name"
+  fi
+fi
+
+if [ -f "$runner_dir/.runner" ]; then
+  configured_name="$(runner_config_value "$runner_dir/.runner" "agentName")"
+  configured_url="$(runner_config_value "$runner_dir/.runner" "gitHubUrl")"
+  if [ -z "$configured_name" ] || [ -z "$configured_url" ]; then
+    echo "Error: could not read the existing runner configuration in $runner_dir/.runner."
+    exit 1
+  fi
+  if [ "$configured_name" != "$runner_name" ]; then
+    echo "Error: $runner_dir is already configured for runner '$configured_name'."
+    exit 1
+  fi
+  if [ "$configured_url" != "$github_url" ]; then
+    echo "Error: runner '$runner_name' is already registered for $configured_url."
+    echo "Use a unique runner name for $github_url."
+    exit 1
+  fi
+fi
+
 mkdir -p -m700 "$user_home/.ssh"
 if [ ! -f "$user_home/.ssh/authorized_keys" ]; then
   : > "$user_home/.ssh/authorized_keys"
@@ -114,7 +156,6 @@ if [ ! -f "$user_home/.ssh/authorized_keys" ]; then
 fi
 chown -R "$username:$username" "$user_home/.ssh"
 
-runner_dir="$user_home/actions-runner"
 mkdir -p "$runner_dir"
 chown "$username:$username" "$runner_dir"
 

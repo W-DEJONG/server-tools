@@ -328,6 +328,9 @@ Install and register a GitHub Actions self-hosted runner.
 
 The URL must be https://github.com/<org> or https://github.com/<org>/<repo>.
 The runner user defaults to github-runner and cannot be root.
+Use a unique runner name for each runner installed for the same Linux user.
+The first runner uses ~/actions-runner. Additional runners use
+~/actions-runners/<name>, each with their own service and work directory.
 
 Usage:
   server-tool create-github-runner <url> <token> [options] [-y]
@@ -337,13 +340,14 @@ Arguments:
   token          Registration token from GitHub
 
 Options:
-  -n, --name NAME            Runner name
+  -n, --name NAME            Unique runner name (default: server hostname)
   -l, --labels LABELS        Comma-separated runner labels
   -u, --user USERNAME        Linux user that runs the runner (default github-runner)
   -y, --yes                  Skip confirmation prompts
 
 Examples:
   server-tool create-github-runner https://github.com/my-org AAAA -n web-1 -l deploy -y
+  server-tool create-github-runner https://github.com/my-org BBBB -n web-2 -l test -u github-runner -y
 EOF
       ;;
     create-horizon)

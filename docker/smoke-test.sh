@@ -64,6 +64,20 @@ if server-tool create-github-runner -y; then
     exit 1
 fi
 
+echo "==> create-github-runner documents multiple instances"
+server-tool help create-github-runner | grep -q '~/actions-runners/<name>'
+server-tool help create-github-runner | grep -q 'unique runner name'
+
+echo "==> create-github-runner rejects unsafe runner names"
+if server-tool create-github-runner https://github.com/my-org test-token -n '../other' -y; then
+    echo "Expected create-github-runner to reject a path-like runner name"
+    exit 1
+fi
+if server-tool create-github-runner https://github.com/my-org test-token -n 'runner two' -y; then
+    echo "Expected create-github-runner to reject a runner name with spaces"
+    exit 1
+fi
+
 echo "==> init-server"
 server-tool init-server -y
 
