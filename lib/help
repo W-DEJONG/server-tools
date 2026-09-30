@@ -46,6 +46,7 @@ command_summary() {
     create-sudo-user) echo "Create a sudo user with SSH key login" ;;
     create-user) echo "Create an application user and group" ;;
     delete-app) echo "Delete an application and its nginx, php-fpm, and cron config" ;;
+    delete-github-runner) echo "Remove one GitHub Actions runner service and installation" ;;
     delete-user) echo "Delete a user, home directory, and related app config" ;;
     disable-scheduler) echo "Remove the Laravel scheduler cron job for an application" ;;
     disable-ssh-password) echo "Disable SSH password logins (key authentication only)" ;;
@@ -58,6 +59,7 @@ command_summary() {
     install) echo "Install one or more application packages" ;;
     list-apps) echo "List installed applications as username application" ;;
     list-domains) echo "List nginx server_name domains for an application" ;;
+    list-github-runners) echo "List GitHub Actions runners as username name url token directory" ;;
     list-horizons) echo "List Horizon Supervisor jobs as username application job" ;;
     list-jobs) echo "List Horizon and queue Supervisor jobs as username application job" ;;
     list-queues) echo "List queue Supervisor jobs as username application job" ;;
@@ -477,6 +479,32 @@ Examples:
   server-tool delete-app testdev demo -y
 EOF
       ;;
+    delete-github-runner)
+      cat <<'EOF'
+delete-github-runner
+
+Stop one GitHub Actions runner, remove its service, and delete its directory.
+The Linux user is kept so other runners under that user continue to work.
+
+The first runner is removed from ~/actions-runner when its registered name
+matches. Additional runners are removed from ~/actions-runners/<name>.
+Pass a GitHub removal token with -t to unregister the runner. Without a token,
+it is removed only from this server.
+
+Usage:
+  server-tool delete-github-runner -n <name> [-u <username>] [-t <removal-token>] [-y]
+
+Options:
+  -n, --name NAME            Runner name to remove
+  -u, --user USERNAME        Linux user that owns the runner (default github-runner)
+  -t, --token TOKEN          GitHub removal token
+  -y, --yes                  Skip confirmation prompts
+
+Examples:
+  server-tool delete-github-runner -n web-2 -u github-runner -t CCCC -y
+  server-tool delete-github-runner -n web-1 -y
+EOF
+      ;;
     delete-user)
       cat <<'EOF'
 delete-user
@@ -748,6 +776,29 @@ Arguments:
 
 Examples:
   server-tool list-domains testdev demo
+EOF
+      ;;
+    list-github-runners)
+      cat <<'EOF'
+list-github-runners
+
+List GitHub Actions runners as "username name url token directory".
+
+The first runner for a user is listed from ~/actions-runner. Additional
+runners are listed from ~/actions-runners/<name>. The token is the
+registration token recorded when the runner was created. A missing name,
+URL, or token is printed as "-". Without a username, every runner under
+/home is listed.
+
+Usage:
+  server-tool list-github-runners [<username>]
+
+Arguments:
+  username       Linux user that owns the runners
+
+Examples:
+  server-tool list-github-runners
+  server-tool list-github-runners github-runner
 EOF
       ;;
     list-horizons)

@@ -1,0 +1,112 @@
+#!/bin/bash
+set -eo pipefail
+
+usage="Usage: server-tool list-github-runners [<username>]"
+if [ $# -gt 1 ]; then
+  echo "$usage"
+  exit 1
+fi
+
+username_filter="${1:-}"
+
+runner_config_value() {
+  local config_file="$1"
+  local field="$2"
+  sed -n "s/^[[:space:]]*\"${field}\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$config_file"
+}
+
+runner_field() {
+  local dir="$1"
+  local field="$2"
+  local fallback="$3"
+  local value=""
+  if [ -f "$dir/.runner" ]; then
+    value="$(runner_config_value "$dir/.runner" "$field")"
+  fi
+  if [ -z "$value" ] || [[ "$value" =~ [[:space:]] ]]; then
+    printf '%s\n' "$fallback"
+    return
+  fi
+  printf '%s\n' "$value"
+}
+
+runner_registration_token() {
+  local token_file="$1/.registration-token"
+  local value=""
+  if [ -f "$token_file" ]; then
+    value="$(head -n 1 "$token_file")"
+  fi
+  if [ -z "$value" ] || [[ "$value" =~ [[:space:]] ]]; then
+    printf '%s\n' "-"
+    return
+  fi
+  printf '%s\n' "$value"
+}
+
+is_runner_dir() {
+  local dir="$1"
+  [ -d "$dir" ] && [ ! -L "$dir" ] || return 1
+  [ -f "$dir/.runner" ] || [ -x "$dir/config.sh" ] || [ -f "$dir/.service" ]
+}
+
+list_user_runners() {
+  local username="$1"
+  local user_home="$2"
+  local dir name url token named
+
+  dir="$user_home/actions-runner"
+  if is_runner_dir "$dir"; then
+    name="$(runner_field "$dir" agentName -)"
+    url="$(runner_field "$dir" gitHubUrl -)"
+    token="$(runner_registration_token "$dir")"
+    printf '%s %s %s %s %s\n' "$username" "$name" "$url" "$token" "$dir"
+  fi
+
+  if [ -d "$user_home/actions-runners" ] && [ ! -L "$user_home/actions-runners" ]; then
+    for named in "$user_home/actions-runners"/*; do
+      is_runner_dir "$named" || continue
+      name="$(runner_field "$named" agentName "$(basename "$named")")"
+      url="$(runner_field "$named" gitHubUrl -)"
+      token="$(runner_registration_token "$named")"
+      printf '%s %s %s %s %s\n' "$username" "$name" "$url" "$token" "$named"
+    done
+  fi
+}
+
+if [ -n "$username_filter" ]; then
+  if [ "$username_filter" = "root" ]; then
+    echo "Error: refusing to manage a GitHub runner for root."
+    exit 1
+  fi
+  if ! [[ "$username_filter" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+    echo "Error: username may only contain lowercase letters, numbers, underscores and hyphens, and must start with a letter or underscore."
+    exit 1
+  fi
+  if ! id "$username_filter" &>/dev/null; then
+    echo "Error: user $username_filter does not exist."
+    exit 1
+  fi
+  user_home="$(getent passwd "$username_filter" | cut -d: -f6)"
+  if [ -z "$user_home" ] || [ ! -d "$user_home" ]; then
+    echo "Error: home directory for $username_filter not found."
+    exit 1
+  fi
+fi
+
+{
+  if [ -n "$username_filter" ]; then
+    list_user_runners "$username_filter" "$user_home"
+  elif [ -d /home ]; then
+    for user_home in /home/*; do
+      [ -d "$user_home" ] || continue
+      [ -L "$user_home" ] && continue
+      username="$(basename "$user_home")"
+      case "$username" in
+        ""|*/*|root|admin|www-data|nginx|nobody|daemon)
+          continue
+          ;;
+      esac
+      list_user_runners "$username" "$user_home"
+    done
+  fi
+} | sort

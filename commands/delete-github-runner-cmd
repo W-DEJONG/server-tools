@@ -1,0 +1,200 @@
+#!/bin/bash
+set -eo pipefail
+
+runner_name=""
+username="github-runner"
+removal_token=""
+usage="Usage: server-tool delete-github-runner -n <name> [-u <username>] [-t <removal-token>] [-y]"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -n|--name)
+      if [ -z "${2:-}" ]; then
+        echo "Error: -n requires a runner name"
+        echo "$usage"
+        exit 1
+      fi
+      runner_name="$2"
+      shift 2
+      ;;
+    -u|--user)
+      if [ -z "${2:-}" ]; then
+        echo "Error: -u requires a username"
+        echo "$usage"
+        exit 1
+      fi
+      username="$2"
+      shift 2
+      ;;
+    -t|--token)
+      if [ -z "${2:-}" ]; then
+        echo "Error: -t requires a removal token"
+        echo "$usage"
+        exit 1
+      fi
+      removal_token="$2"
+      shift 2
+      ;;
+    *)
+      echo "Error: unknown argument '$1'"
+      echo "$usage"
+      exit 1
+      ;;
+  esac
+done
+
+if [ -z "$runner_name" ]; then
+  echo "Error: a runner name is required."
+  echo "$usage"
+  exit 1
+fi
+
+if [ -n "$removal_token" ] && [[ "$removal_token" =~ [[:space:]] ]]; then
+  echo "Error: the removal token cannot contain whitespace."
+  exit 1
+fi
+
+if [ "$username" = "root" ]; then
+  echo "Error: refusing to manage a GitHub runner for root."
+  exit 1
+fi
+
+if ! [[ "$username" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+  echo "Error: username may only contain lowercase letters, numbers, underscores and hyphens, and must start with a letter or underscore."
+  exit 1
+fi
+
+if ! [[ "$runner_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+  echo "Error: runner name must start with a letter or number and may only contain letters, numbers, dots, underscores and hyphens."
+  exit 1
+fi
+
+if ! id "$username" &>/dev/null; then
+  echo "Error: user $username does not exist."
+  exit 1
+fi
+
+user_home="$(getent passwd "$username" | cut -d: -f6)"
+if [ -z "$user_home" ] || [ ! -d "$user_home" ]; then
+  echo "Error: home directory for $username not found."
+  exit 1
+fi
+
+runner_config_value() {
+  local config_file="$1"
+  local field="$2"
+  sed -n "s/^[[:space:]]*\"${field}\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$config_file"
+}
+
+legacy_runner_dir="$user_home/actions-runner"
+named_runner_dir="$user_home/actions-runners/$runner_name"
+runner_dir=""
+
+if [ -d "$named_runner_dir" ]; then
+  runner_dir="$named_runner_dir"
+fi
+
+if [ -f "$legacy_runner_dir/.runner" ]; then
+  legacy_runner_name="$(runner_config_value "$legacy_runner_dir/.runner" "agentName")"
+  if [ -z "$legacy_runner_name" ]; then
+    echo "Error: could not determine the runner name from $legacy_runner_dir/.runner."
+    exit 1
+  fi
+  if [ "$legacy_runner_name" = "$runner_name" ]; then
+    if [ -n "$runner_dir" ]; then
+      echo "Error: runner '$runner_name' exists in both $legacy_runner_dir and $named_runner_dir."
+      exit 1
+    fi
+    runner_dir="$legacy_runner_dir"
+  fi
+fi
+
+if [ -z "$runner_dir" ] || [ ! -d "$runner_dir" ]; then
+  echo "Error: no GitHub runner named '$runner_name' for user $username."
+  exit 1
+fi
+
+if [ -L "$runner_dir" ]; then
+  echo "Error: refusing to remove symlinked runner directory $runner_dir."
+  exit 1
+fi
+
+case "$runner_dir" in
+  "$user_home/actions-runner"|"$user_home/actions-runners/$runner_name")
+    ;;
+  *)
+    echo "Error: refusing to remove unexpected path $runner_dir."
+    exit 1
+    ;;
+esac
+
+if [ -f "$runner_dir/.runner" ]; then
+  configured_name="$(runner_config_value "$runner_dir/.runner" "agentName")"
+  if [ -z "$configured_name" ]; then
+    echo "Error: could not read the runner name from $runner_dir/.runner."
+    exit 1
+  fi
+  if [ "$configured_name" != "$runner_name" ]; then
+    echo "Error: $runner_dir is configured for runner '$configured_name'."
+    exit 1
+  fi
+fi
+
+echo "Runner name: $runner_name"
+echo "Linux user: $username"
+echo "Directory: $runner_dir"
+if [ -n "$removal_token" ]; then
+  echo "GitHub registration: remove with the supplied token"
+else
+  echo "GitHub registration: kept. Pass -t <removal-token> to unregister it."
+fi
+
+confirm_or_exit "WARNING! This will remove this GitHub runner from the server. The Linux user is kept. Do you want to proceed? (y/n): "
+
+if [ -x "$runner_dir/svc.sh" ] && [ -f "$runner_dir/.service" ]; then
+  echo "Stopping runner service..."
+  (
+    cd "$runner_dir"
+    ./svc.sh stop
+  )
+fi
+
+if [ -n "$removal_token" ]; then
+  if [ ! -x "$runner_dir/config.sh" ]; then
+    echo "Error: $runner_dir/config.sh is missing, so the runner cannot be unregistered."
+    exit 1
+  fi
+  echo "Unregistering runner from GitHub..."
+  (
+    cd "$runner_dir"
+    sudo -u "$username" ./config.sh remove --unattended --token "$removal_token"
+  )
+fi
+
+if [ -x "$runner_dir/svc.sh" ] && [ -f "$runner_dir/.service" ]; then
+  echo "Uninstalling runner service..."
+  (
+    cd "$runner_dir"
+    ./svc.sh uninstall
+  )
+fi
+
+echo "Removing $runner_dir"
+rm -rf -- "$runner_dir"
+if [ "$runner_dir" = "$named_runner_dir" ]; then
+  rmdir "$user_home/actions-runners" 2>/dev/null || true
+fi
+
+if [ -e "$runner_dir" ]; then
+  echo "Cleanup incomplete: $runner_dir still exists."
+  exit 1
+fi
+
+echo
+echo "GitHub Actions runner has been removed."
+echo "  Directory: $runner_dir"
+echo "  User:      $username (kept)"
+echo "  Name:      $runner_name"
+if [ -z "$removal_token" ]; then
+  echo
+  echo "The runner was not unregistered at GitHub. Remove it there if it is still registered."
+fi

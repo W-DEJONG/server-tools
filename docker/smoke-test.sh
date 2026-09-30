@@ -35,6 +35,7 @@ server-tool help | grep -q stop-queue
 server-tool help | grep -q list-horizons
 server-tool help | grep -q list-queues
 server-tool help | grep -q list-jobs
+server-tool help | grep -q list-github-runners
 
 echo "==> help lists app-structure topic"
 server-tool help | grep -q app-structure
@@ -77,6 +78,131 @@ if server-tool create-github-runner https://github.com/my-org test-token -n 'run
     echo "Expected create-github-runner to reject a runner name with spaces"
     exit 1
 fi
+
+echo "==> delete-github-runner documents one-instance removal"
+server-tool help | grep -q delete-github-runner
+server-tool help delete-github-runner | grep -q -- '-t <removal-token>'
+server-tool help delete-github-runner | grep -q '~/actions-runners/<name>'
+
+echo "==> delete-github-runner rejects unsafe arguments"
+if server-tool delete-github-runner -y; then
+    echo "Expected delete-github-runner without a name to fail"
+    exit 1
+fi
+if server-tool delete-github-runner -n '../other' -y; then
+    echo "Expected delete-github-runner to reject a path-like runner name"
+    exit 1
+fi
+if server-tool delete-github-runner -n web-1 -u root -y; then
+    echo "Expected delete-github-runner to reject root"
+    exit 1
+fi
+
+echo "==> delete-github-runner removes one instance and keeps the user"
+if id ghrunner >/dev/null 2>&1; then
+    userdel -r ghrunner
+fi
+useradd -m -s /bin/bash ghrunner
+install -d -o ghrunner -g ghrunner /home/ghrunner/actions-runner /home/ghrunner/actions-runners/web-2 /home/ghrunner/actions-runners/web-3
+cat > /home/ghrunner/actions-runner/.runner <<'EOF'
+{
+  "agentName": "web-1",
+  "gitHubUrl": "https://github.com/my-org"
+}
+EOF
+cat > /home/ghrunner/actions-runners/web-2/.runner <<'EOF'
+{
+  "agentName": "web-2",
+  "gitHubUrl": "https://github.com/my-org"
+}
+EOF
+cat > /home/ghrunner/actions-runners/web-3/.runner <<'EOF'
+{
+  "agentName": "web-3",
+  "gitHubUrl": "https://github.com/my-org"
+}
+EOF
+call_log="$(mktemp -d)"
+chmod 777 "$call_log"
+for runner_spec in "web-1 /home/ghrunner/actions-runner 0" "web-2 /home/ghrunner/actions-runners/web-2 0" "web-3 /home/ghrunner/actions-runners/web-3 1"; do
+    runner_label="${runner_spec%% *}"
+    runner_rest="${runner_spec#* }"
+    runner_dir="${runner_rest% *}"
+    runner_status="${runner_rest##* }"
+    printf '%s\n' 'actions.runner.test.service' > "$runner_dir/.service"
+    cat > "$runner_dir/svc.sh" <<EOF
+#!/bin/bash
+printf '%s\n' "\$1" >> "$call_log/${runner_label}.svc"
+EOF
+    cat > "$runner_dir/config.sh" <<EOF
+#!/bin/bash
+printf '%s\n' "\$*" >> "$call_log/${runner_label}.config"
+exit ${runner_status}
+EOF
+    chmod 755 "$runner_dir/svc.sh" "$runner_dir/config.sh"
+done
+chown -R ghrunner:ghrunner /home/ghrunner/actions-runner /home/ghrunner/actions-runners
+
+echo "==> list-github-runners ghrunner"
+server-tool help list-github-runners | grep -q 'username name url token directory'
+printf '%s\n' 'token-web-1' > /home/ghrunner/actions-runner/.registration-token
+printf '%s\n' 'token-web-2' > /home/ghrunner/actions-runners/web-2/.registration-token
+chown ghrunner:ghrunner /home/ghrunner/actions-runner/.registration-token /home/ghrunner/actions-runners/web-2/.registration-token
+chmod 600 /home/ghrunner/actions-runner/.registration-token /home/ghrunner/actions-runners/web-2/.registration-token
+[ "$(server-tool list-github-runners ghrunner | grep -c .)" -eq 3 ]
+server-tool list-github-runners ghrunner | grep -qxF 'ghrunner web-1 https://github.com/my-org token-web-1 /home/ghrunner/actions-runner'
+server-tool list-github-runners ghrunner | grep -qxF 'ghrunner web-2 https://github.com/my-org token-web-2 /home/ghrunner/actions-runners/web-2'
+server-tool list-github-runners ghrunner | grep -qxF 'ghrunner web-3 https://github.com/my-org - /home/ghrunner/actions-runners/web-3'
+server-tool list-github-runners | grep -qxF 'ghrunner web-1 https://github.com/my-org token-web-1 /home/ghrunner/actions-runner'
+if server-tool list-github-runners ghrunner extra; then
+    echo "Expected list-github-runners to reject extra arguments"
+    exit 1
+fi
+
+if server-tool delete-github-runner -n missing -u ghrunner -y; then
+    echo "Expected delete-github-runner to reject an unknown runner"
+    exit 1
+fi
+test -d /home/ghrunner/actions-runner
+test -d /home/ghrunner/actions-runners/web-2
+
+server-tool delete-github-runner -n web-2 -u ghrunner -y
+test ! -e /home/ghrunner/actions-runners/web-2
+[ "$(server-tool list-github-runners ghrunner | grep -c .)" -eq 2 ]
+if server-tool list-github-runners ghrunner | grep -qxF 'ghrunner web-2 https://github.com/my-org token-web-2 /home/ghrunner/actions-runners/web-2'; then
+    echo "Expected list-github-runners to omit the removed runner"
+    exit 1
+fi
+test -d /home/ghrunner/actions-runner
+test -d /home/ghrunner/actions-runners/web-3
+test ! -e "$call_log/web-2.config"
+grep -qx stop "$call_log/web-2.svc"
+grep -qx uninstall "$call_log/web-2.svc"
+test ! -e "$call_log/web-1.svc"
+id ghrunner >/dev/null
+
+if server-tool delete-github-runner -n web-3 -u ghrunner -t bad-token -y; then
+    echo "Expected delete-github-runner to keep the directory when unregister fails"
+    exit 1
+fi
+test -d /home/ghrunner/actions-runners/web-3
+grep -qx stop "$call_log/web-3.svc"
+grep -qx 'remove --unattended --token bad-token' "$call_log/web-3.config"
+if grep -qx uninstall "$call_log/web-3.svc"; then
+    echo "Expected service uninstall to wait until unregister succeeds"
+    exit 1
+fi
+test -d /home/ghrunner/actions-runner
+
+server-tool delete-github-runner -n web-1 -u ghrunner -t remove-token -y
+test ! -e /home/ghrunner/actions-runner
+grep -qx stop "$call_log/web-1.svc"
+grep -qx uninstall "$call_log/web-1.svc"
+grep -qx 'remove --unattended --token remove-token' "$call_log/web-1.config"
+test -d /home/ghrunner/actions-runners/web-3
+id ghrunner >/dev/null
+userdel -r ghrunner
+rm -rf "$call_log"
 
 echo "==> init-server"
 server-tool init-server -y

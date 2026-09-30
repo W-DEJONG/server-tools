@@ -112,6 +112,10 @@ server-tool create-github-runner <url> <token> [-n <name>] [-l <labels>] [-u <us
 server-tool create-github-runner https://github.com/my-org AAAA -n web-1 -l deploy -y
 # Multiple isolated runners can share the same Linux user; use a unique name for each runner.
 server-tool create-github-runner https://github.com/my-org BBBB -n web-2 -l test -u github-runner -y
+server-tool list-github-runners [<username>]
+server-tool list-github-runners github-runner
+server-tool delete-github-runner -n <name> [-u <username>] [-t <removal-token>] [-y]
+server-tool delete-github-runner -n web-2 -u github-runner -t CCCC -y
 ```
 
 Install:

@@ -197,6 +197,9 @@ else
     cd "$runner_dir"
     sudo -u "$username" ./config.sh "${config_args[@]}"
   )
+  printf '%s\n' "$runner_token" > "$runner_dir/.registration-token"
+  chown "$username:$username" "$runner_dir/.registration-token"
+  chmod 600 "$runner_dir/.registration-token"
 fi
 
 if [ ! -f "$runner_dir/.service" ]; then
@@ -222,5 +225,6 @@ echo "  Directory: $runner_dir"
 echo "  User:      $username"
 echo "  Name:      $runner_name"
 echo "  URL:       $github_url"
+echo "  Token:     $runner_token"
 echo
 echo "Check status with: $runner_dir/svc.sh status"
