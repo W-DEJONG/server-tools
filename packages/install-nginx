@@ -12,6 +12,16 @@ apt install -y nginx certbot python3-certbot-nginx ufw
 systemctl enable nginx
 systemctl start nginx
 
+cat > /etc/nginx/conf.d/10-server-tool-large-files.conf <<'EOF'
+# Allow applications to stream files up to 100 GB through PHP-FPM.
+# The extra 1 GB allows for multipart/form-data overhead.
+client_max_body_size 150M;
+fastcgi_read_timeout 180;
+EOF
+
+nginx -t
+nginx -s reload
+
 echo "Allowing HTTP and HTTPS in ufw..."
 ufw allow 80/tcp
 ufw allow 443/tcp

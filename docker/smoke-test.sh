@@ -209,6 +209,13 @@ server-tool init-server -y
 
 echo "==> install nginx"
 server-tool install nginx -y
+large_files_nginx_conf=/etc/nginx/conf.d/10-server-tool-large-files.conf
+test -f "$large_files_nginx_conf"
+grep -qxF 'client_max_body_size 150M;' "$large_files_nginx_conf"
+grep -qxF 'fastcgi_read_timeout 180;' "$large_files_nginx_conf"
+nginx_config="$(nginx -T 2>&1)"
+grep -qF 'client_max_body_size 150M;' <<< "$nginx_config"
+grep -qF 'fastcgi_read_timeout 180;' <<< "$nginx_config"
 
 echo "==> check-certbot-renew"
 server-tool check-certbot-renew -y
@@ -221,6 +228,15 @@ fi
 
 echo "==> install php ${php_version}"
 server-tool install php -y "$php_version"
+large_files_php_conf="/etc/php/${php_version}/fpm/conf.d/99-server-tool-large-files.ini"
+test -f "$large_files_php_conf"
+grep -qxF 'upload_max_filesize = 150M' "$large_files_php_conf"
+grep -qxF 'post_max_size = 151M' "$large_files_php_conf"
+grep -qxF 'max_execution_time = 0' "$large_files_php_conf"
+grep -qxF 'max_input_time = -1' "$large_files_php_conf"
+php_fpm_info="$(php-fpm${php_version} -i)"
+grep -qE 'upload_max_filesize.*150M' <<< "$php_fpm_info"
+grep -qE 'post_max_size.*151M' <<< "$php_fpm_info"
 
 echo "==> install npm ${other_node_version} ${node_version}"
 server-tool install npm -y "$other_node_version" "$node_version"

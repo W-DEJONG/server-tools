@@ -34,4 +34,15 @@ for version in "${SELECTED_VERSIONS[@]}"; do
         php${version}-bcmath \
         php${version}-sqlite3 \
         php${version}-imagick
+
+    cat > "/etc/php/${version}/fpm/conf.d/99-server-tool-large-files.ini" <<'EOF'
+; Allow applications to stream files up to 100 GB through PHP-FPM.
+upload_max_filesize = 150M
+post_max_size = 151M
+max_execution_time = 0
+max_input_time = -1
+EOF
+
+    php-fpm${version} -tt
+    systemctl restart "php${version}-fpm"
 done
