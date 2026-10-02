@@ -236,8 +236,9 @@ backup-app
 Back up an application to S3, or enable/disable its daily cron.
 
 Without --enable or --disable, zips the application (and database when
-.env.db is present) and uploads it to S3. Requires /etc/server-tool/backup.conf,
-written by: server-tool install aws <bucket>
+.env.db is present) and uploads it to S3. The database dump is made with
+dump-db. Requires /etc/server-tool/backup.conf, written by:
+server-tool install aws <bucket>
 
 Usage:
   server-tool backup-app <username> <application> [--enable|--disable] [-y]
@@ -574,6 +575,10 @@ Dump an application's database to a file.
 
 Reads connection settings from the application's .env.db. PostgreSQL dumps
 are custom-format .dump files; MySQL dumps are gzipped SQL.
+
+MySQL dumps pass --set-gtid-purged=OFF when the client supports it, so
+mysqldump does not run FLUSH TABLES. The application user does not need
+RELOAD. InnoDB consistency still comes from --single-transaction.
 
 Usage:
   server-tool dump-db <username> <application> [<target-folder>] [-y]

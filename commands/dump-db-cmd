@@ -39,10 +39,18 @@ echo "Output: $dump_file"
 confirm_or_exit "This will dump the database of $username/$app_name. Do you want to proceed? (y/n): "
 
 if [ "$DB_CONNECTION" = "mysql" ]; then
-  mysql_with_app_cnf "$(mysql_dump_bin)" \
-    --single-transaction \
-    --routines \
-    --triggers \
+  dump_bin="$(mysql_dump_bin)"
+  dump_args=(--single-transaction --routines --triggers)
+  dump_help="$("$dump_bin" --help 2>/dev/null || true)"
+  # Skip FLUSH TABLES. That needs RELOAD, which the application user does not have.
+  # InnoDB stays consistent via the transaction snapshot.
+  if grep -q -- '--set-gtid-purged' <<<"$dump_help"; then
+    dump_args+=(--set-gtid-purged=OFF)
+  fi
+  if grep -q -- '--no-tablespaces' <<<"$dump_help"; then
+    dump_args+=(--no-tablespaces)
+  fi
+  mysql_with_app_cnf "$dump_bin" "${dump_args[@]}" \
     "$DB_DATABASE" | gzip -c > "$dump_file"
 else
   PGPASSWORD="$DB_PASSWORD" pg_dump \
