@@ -18,6 +18,6 @@ confirm_or_exit "This will refresh the HTTP probe targets for Grafana Alloy. Con
 sync_all_app_monitoring
 
 echo
-echo "HTTP probe targets updated."
+echo "HTTP probe targets and application log access updated."
 echo "  File: $(monitoring_blackbox_targets_file)"
-echo "Alloy picks up the file within 30 seconds."
+echo "Alloy picks up log files and probe targets within 30 seconds."

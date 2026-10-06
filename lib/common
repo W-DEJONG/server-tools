@@ -2293,12 +2293,38 @@ EOF
   chmod 644 "$file"
 }
 
+grant_alloy_ancestors() {
+  local alloy_user="$1"
+  local dir="$2"
+
+  while [ -n "$dir" ] && [ "$dir" != "/" ] && [ "$dir" != "/home" ]; do
+    if [ -d "$dir" ]; then
+      setfacl -m "u:${alloy_user}:r-x" "$dir"
+    fi
+    dir="$(dirname "$dir")"
+  done
+}
+
+grant_alloy_log_dir() {
+  local alloy_user="$1"
+  local logs="$2"
+  local real
+
+  [ -d "$logs" ] || return 0
+  setfacl -R -m "u:${alloy_user}:rX" "$logs"
+  find "$logs" -type d -exec setfacl -m "d:u:${alloy_user}:rX" {} +
+  grant_alloy_ancestors "$alloy_user" "$logs"
+  real="$(readlink -f "$logs")"
+  if [ -n "$real" ] && [ "$real" != "$logs" ]; then
+    grant_alloy_ancestors "$alloy_user" "$real"
+  fi
+}
+
 grant_alloy_log_access() {
   local username="$1"
   local app_name="$2"
   local alloy_user="alloy"
   local app_root="/home/${username}/${app_name}"
-  local logs real dir
 
   if ! id "$alloy_user" >/dev/null 2>&1; then
     return 0
@@ -2311,28 +2337,21 @@ grant_alloy_log_access() {
     apt-get -y install acl
   fi
 
-  setfacl -m "u:${alloy_user}:--x" "/home/${username}"
-  setfacl -m "u:${alloy_user}:--x" "$app_root"
+  # r-x, not only traverse: the log globs must list /home/<user> and the app directory.
+  setfacl -m "u:${alloy_user}:r-x" "/home/${username}"
+  setfacl -m "u:${alloy_user}:r-x" "$app_root"
 
   if [ ! -d "$app_root/log" ]; then
     mkdir -p "$app_root/log"
     chown "$username:$username" "$app_root/log"
   fi
-  setfacl -R -m "u:${alloy_user}:rX" "$app_root/log"
-  find "$app_root/log" -type d -exec setfacl -m "d:u:${alloy_user}:rX" {} +
+  grant_alloy_log_dir "$alloy_user" "$app_root/log"
 
-  for logs in "$app_root/current/storage/logs" "$app_root/shared/storage/logs"; do
-    [ -d "$logs" ] || continue
-    real="$(readlink -f "$logs")"
-    [ -d "$real" ] || continue
-    setfacl -R -m "u:${alloy_user}:rX" "$real"
-    find "$real" -type d -exec setfacl -m "d:u:${alloy_user}:rX" {} +
-    dir="$real"
-    while [ "$dir" != "/" ] && [ "$dir" != "/home" ]; do
-      setfacl -m "u:${alloy_user}:--x" "$dir"
-      dir="$(dirname "$dir")"
-    done
-  done
+  if [ -e "$app_root/current" ]; then
+    grant_alloy_ancestors "$alloy_user" "$(readlink -f "$app_root/current")"
+  fi
+  grant_alloy_log_dir "$alloy_user" "$app_root/current/storage/logs"
+  grant_alloy_log_dir "$alloy_user" "$app_root/shared/storage/logs"
 }
 
 sync_app_monitoring() {

@@ -1166,9 +1166,10 @@ EOF
       cat <<'EOF'
 update-probes
 
-Refresh the HTTP probe list that Grafana Alloy sends to the monitoring
-server. Each dotted nginx server_name becomes a probe labeled with that
-domain. Run this on an application server after server-tool self-update.
+Refresh HTTP probes and Alloy's read access to application logs.
+Each dotted nginx server_name becomes a probe labeled with that domain.
+Nginx and Laravel logs are read from log/ and current/storage/logs.
+Run this on an application server after server-tool self-update.
 
 Usage:
   server-tool update-probes [-y]
