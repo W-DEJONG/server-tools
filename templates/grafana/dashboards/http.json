@@ -37,7 +37,7 @@
         {
           "refId": "A",
           "expr": "probe_success{server=~\"$server\"}",
-          "legendFormat": "{{username}}/{{application}} {{instance}}"
+          "legendFormat": "{{instance}}"
         }
       ],
       "fieldConfig": {
@@ -62,7 +62,7 @@
         {
           "refId": "A",
           "expr": "probe_duration_seconds{server=~\"$server\"}",
-          "legendFormat": "{{username}}/{{application}} {{instance}}"
+          "legendFormat": "{{instance}}"
         }
       ],
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
@@ -77,7 +77,7 @@
         {
           "refId": "A",
           "expr": "probe_http_status_code{server=~\"$server\"}",
-          "legendFormat": "{{username}}/{{application}} {{instance}}"
+          "legendFormat": "{{instance}}"
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none", "decimals": 0 }, "overrides": [] }

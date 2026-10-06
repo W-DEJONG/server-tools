@@ -21,12 +21,31 @@ discovery.file "http_checks" {
 }
 
 prometheus.exporter.blackbox "http" {
-  config  = `{ modules: { http_2xx: { prober: http, timeout: 10s } } }`
+  config = `
+    modules:
+      http_2xx:
+        prober: http
+        timeout: 10s
+        http:
+          preferred_ip_protocol: ip4
+          ip_protocol_fallback: true
+          follow_redirects: true
+          valid_status_codes: [200, 201, 202, 204, 301, 302, 303, 307, 308, 401, 403, 404]
+  `
   targets = discovery.file.http_checks.targets
 }
 
+discovery.relabel "http_checks" {
+  targets = prometheus.exporter.blackbox.http.targets
+
+  rule {
+    source_labels = ["__param_target"]
+    target_label  = "instance"
+  }
+}
+
 prometheus.scrape "http_checks" {
-  targets         = prometheus.exporter.blackbox.http.targets
+  targets         = discovery.relabel.http_checks.output
   forward_to      = [prometheus.remote_write.metrics.receiver]
   scrape_interval = "30s"
   job_name        = "http_checks"
