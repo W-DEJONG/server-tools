@@ -1,0 +1,24 @@
+#!/bin/bash
+set -eo pipefail
+
+usage="Usage: server-tool update-grafana [-y]"
+if [ $# -ne 0 ]; then
+  echo "$usage"
+  exit 1
+fi
+
+provider="/etc/grafana/provisioning/dashboards/server-tool.yaml"
+if [ ! -f "$provider" ]; then
+  echo "Error: Grafana dashboards are not installed."
+  echo "Run: server-tool install monitoring -d <domain> -e <email>"
+  exit 1
+fi
+
+confirm_or_exit "This will replace the shipped Server tools dashboards. Continue? (y/n): "
+
+install_grafana_dashboards
+
+echo
+echo "Grafana dashboards updated."
+echo "  Dashboards: /var/lib/grafana/dashboards/server-tools"
+echo "Grafana reloads these files within 30 seconds."
