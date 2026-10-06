@@ -60,6 +60,8 @@ server-tool install alloy --url https://grafana.example.com --api-key-file /root
 server-tool install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key -y
 server-tool update-grafana
 server-tool update-grafana -y
+server-tool update-probes
+server-tool update-probes -y
 server-tool install aws
 server-tool install aws my-backups
 server-tool install aws my-backups -y

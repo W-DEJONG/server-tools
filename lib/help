@@ -76,6 +76,7 @@ command_summary() {
     switch-php) echo "Switch an application to another PHP version" ;;
     test-backup) echo "Upload a small test object to verify S3 backup config" ;;
     update-grafana) echo "Replace the shipped Grafana dashboards with the current templates" ;;
+    update-probes) echo "Refresh Alloy HTTP probe targets from the installed applications" ;;
     *) echo "No summary available" ;;
   esac
 }
@@ -1159,6 +1160,24 @@ Options:
 
 Examples:
   server-tool update-grafana -y
+EOF
+      ;;
+    update-probes)
+      cat <<'EOF'
+update-probes
+
+Refresh the HTTP probe list that Grafana Alloy sends to the monitoring
+server. Each dotted nginx server_name becomes a probe labeled with that
+domain. Run this on an application server after server-tool self-update.
+
+Usage:
+  server-tool update-probes [-y]
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool update-probes -y
 EOF
       ;;
     *)

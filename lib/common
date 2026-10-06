@@ -2266,6 +2266,7 @@ write_monitoring_blackbox_targets() {
       "module": "http_2xx",
       "username": "$(monitoring_json_escape "$username")",
       "application": "$(monitoring_json_escape "$app_name")",
+      "domain": "$(monitoring_json_escape "$domain")",
       "server": "$(monitoring_json_escape "$server")"
     }
   }

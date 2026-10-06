@@ -76,8 +76,13 @@ echo "==> help install alloy and monitoring"
 server-tool help install alloy | grep -q -- '--api-key-file'
 server-tool help install monitoring | grep -q -- '-d <domain>'
 server-tool help update-grafana | grep -q 'Usage:'
+server-tool help update-probes | grep -q 'Usage:'
 if server-tool update-grafana -y; then
     echo "Expected update-grafana to fail before monitoring is installed"
+    exit 1
+fi
+if server-tool update-probes -y; then
+    echo "Expected update-probes to fail before Alloy is installed"
     exit 1
 fi
 
@@ -784,6 +789,7 @@ test -f /home/testdev/demo/nginx/ssl/demo.example.test.key
 grep -q "return 301 https" /home/testdev/demo/nginx/demo.conf
 
 grep -q 'https://demo.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json
+grep -q '"domain": "demo.example.test"' /var/lib/server-tool/monitoring/blackbox-targets.json
 
 echo "==> enable-ssl testdev demo --self-signed --renew"
 server-tool enable-ssl testdev demo -d demo.example.test --self-signed --renew -y

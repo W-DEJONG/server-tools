@@ -1,0 +1,23 @@
+#!/bin/bash
+set -eo pipefail
+
+usage="Usage: server-tool update-probes [-y]"
+if [ $# -ne 0 ]; then
+  echo "$usage"
+  exit 1
+fi
+
+if ! command -v alloy >/dev/null 2>&1; then
+  echo "Error: Grafana Alloy is not installed."
+  echo "Run: server-tool install alloy --url <https://host> --api-key-file <file>"
+  exit 1
+fi
+
+confirm_or_exit "This will refresh the HTTP probe targets for Grafana Alloy. Continue? (y/n): "
+
+sync_all_app_monitoring
+
+echo
+echo "HTTP probe targets updated."
+echo "  File: $(monitoring_blackbox_targets_file)"
+echo "Alloy picks up the file within 30 seconds."
