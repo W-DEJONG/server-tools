@@ -43,6 +43,8 @@ set_nginx_server_names "$APP_NGINX_CONF" "$new_names"
 chown "$username:$username" "$APP_NGINX_CONF"
 reload_nginx
 
+sync_app_monitoring "$username" "$app_name"
+
 echo
 echo "Domain added."
 echo "  Domain: $domain"

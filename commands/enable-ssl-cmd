@@ -140,6 +140,8 @@ if [ "$renew" -eq 1 ]; then
   apply_cert_permissions
   reload_nginx
 
+  sync_app_monitoring "$username" "$app_name"
+
   echo
   echo "HTTPS certificate renewed."
   echo "  Domain: $domain"
@@ -177,6 +179,8 @@ else
 fi
 
 reload_nginx
+
+sync_app_monitoring "$username" "$app_name"
 
 echo
 echo "HTTPS is ready."

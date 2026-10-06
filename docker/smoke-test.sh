@@ -1,6 +1,25 @@
 #!/bin/bash
 set -euo pipefail
 
+# grep -q exits at the first match and closes the pipe. The producer then
+# dies with SIGPIPE, and pipefail turns a successful search into a failure.
+grep() {
+  local quiet=0 arg
+  for arg in "$@"; do
+    case "$arg" in
+      --) break ;;
+      -*[q]*) quiet=1 ;;
+    esac
+  done
+  if [ "$quiet" -eq 1 ] && [ ! -t 0 ]; then
+    local input
+    input="$(cat)"
+    command grep "$@" <<<"$input"
+    return
+  fi
+  command grep "$@"
+}
+
 repo_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 php_version="$(tail -1 "$repo_dir/templates/php-versions")"
 other_php_version="$(tail -2 "$repo_dir/templates/php-versions" | head -1)"
@@ -52,6 +71,20 @@ server-tool help stop-queue | grep -q -- '--disable'
 echo "==> help app-structure describes the application layout"
 server-tool help app-structure | grep -q '/home/<username>/<application>/'
 server-tool help app-structure | grep -q 'current'
+
+echo "==> help install alloy and monitoring"
+server-tool help install alloy | grep -q -- '--api-key-file'
+server-tool help install monitoring | grep -q -- '-d <domain>'
+
+echo "==> install alloy and monitoring require arguments"
+if server-tool install alloy -y; then
+    echo "Expected install alloy without arguments to fail"
+    exit 1
+fi
+if server-tool install monitoring -y; then
+    echo "Expected install monitoring without arguments to fail"
+    exit 1
+fi
 
 echo "==> help unknown command is rejected"
 if server-tool help definitely-not-a-command; then
@@ -226,6 +259,154 @@ else
     test -f /etc/cron.d/certbot
 fi
 
+echo "==> install monitoring"
+cat > /usr/local/bin/certbot <<'EOF'
+#!/bin/bash
+set -euo pipefail
+domain=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -d|--domain)
+            domain="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+if [ -z "$domain" ]; then
+    echo "certbot stub: missing domain" >&2
+    exit 1
+fi
+live="/etc/letsencrypt/live/${domain}"
+mkdir -p "$live"
+openssl req -x509 -nodes -newkey rsa:2048 \
+    -keyout "${live}/privkey.pem" \
+    -out "${live}/fullchain.pem" \
+    -subj "/CN=${domain}" \
+    -days 30 >/dev/null 2>&1
+python3 - "$domain" <<'PY'
+import pathlib, sys
+domain = sys.argv[1]
+path = pathlib.Path("/etc/nginx/sites-available/monitoring")
+text = path.read_text()
+text = text.replace("    listen 80;\n", "", 1)
+text = text.replace("    listen [::]:80;\n", "", 1)
+ssl = (
+    "    listen 443 ssl;\n"
+    "    listen [::]:443 ssl;\n"
+    f"    ssl_certificate /etc/letsencrypt/live/{domain}/fullchain.pem;\n"
+    f"    ssl_certificate_key /etc/letsencrypt/live/{domain}/privkey.pem;\n"
+)
+if "listen 443 ssl;" not in text:
+    text = text.replace("    server_name ", ssl + "    server_name ", 1)
+if "return 301 https://" not in text:
+    text += f"""
+server {{
+    listen 80;
+    listen [::]:80;
+    server_name {domain};
+    return 301 https://$host$request_uri;
+}}
+"""
+path.write_text(text)
+PY
+EOF
+chmod 755 /usr/local/bin/certbot
+server-tool install monitoring -d monitor.example.test -e admin@example.test -y
+monitoring_key="$(cat /etc/server-tool/monitoring-api.key)"
+monitoring_password="$(sed -n 's/^GRAFANA_ADMIN_PASSWORD=//p' /etc/server-tool/monitoring.conf)"
+server-tool install monitoring -d monitor.example.test -e admin@example.test -y
+[ "$(cat /etc/server-tool/monitoring-api.key)" = "$monitoring_key" ]
+[ "$(sed -n 's/^GRAFANA_ADMIN_PASSWORD=//p' /etc/server-tool/monitoring.conf)" = "$monitoring_password" ]
+rm -f /usr/local/bin/certbot
+[ "$(stat -c %a /etc/server-tool/monitoring.conf)" = "600" ]
+[ "$(stat -c %a /etc/server-tool/monitoring-api.key)" = "600" ]
+[ "$(stat -c %a /etc/server-tool/nginx-monitoring-map.conf)" = "600" ]
+grep -F "$monitoring_key" /etc/server-tool/nginx-monitoring-map.conf >/dev/null
+if grep -F "$monitoring_key" /etc/nginx/sites-available/monitoring; then
+    echo "Expected the nginx site to omit the API key"
+    exit 1
+fi
+grep -q 'location /api/v1/write' /etc/nginx/sites-available/monitoring
+grep -q 'location /loki/api/v1/push' /etc/nginx/sites-available/monitoring
+grep -q 'proxy_pass http://127.0.0.1:3000;' /etc/nginx/sites-available/monitoring
+grep -q 'client_max_body_size 32m;' /etc/nginx/sites-available/monitoring
+grep -q 'listen 443 ssl;' /etc/nginx/sites-available/monitoring
+grep -q 'return 301 https://' /etc/nginx/sites-available/monitoring
+grep -q 'http://127.0.0.1:9090' /etc/grafana/provisioning/datasources/server-tool.yaml
+grep -q 'http://127.0.0.1:3100' /etc/grafana/provisioning/datasources/server-tool.yaml
+grep -q 'server-tools-server' /var/lib/grafana/dashboards/server-tools/server.json
+grep -q 'probe_success' /var/lib/grafana/dashboards/server-tools/http.json
+grep -q 'label_values(username)' /var/lib/grafana/dashboards/server-tools/logs.json
+grep -q 'GF_AUTH_ANONYMOUS_ENABLED=false' /etc/systemd/system/grafana-server.service.d/server-tool.conf
+grep -q 'GF_SERVER_ROOT_URL=https://monitor.example.test/' /etc/systemd/system/grafana-server.service.d/server-tool.conf
+systemctl is-active --quiet prometheus
+systemctl is-active --quiet loki
+systemctl is-active --quiet grafana-server
+for monitoring_port in 9090 3100 3000; do
+    monitoring_ok=0
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+        if ss -ltn | awk '{print $4}' | grep -qx "127.0.0.1:${monitoring_port}"; then
+            monitoring_ok=1
+            break
+        fi
+        sleep 1
+    done
+    if [ "$monitoring_ok" -ne 1 ]; then
+        echo "Timed out waiting for 127.0.0.1:${monitoring_port}"
+        exit 1
+    fi
+done
+if ss -ltn | awk '{print $4}' | grep -Eq '^(0\.0\.0\.0|\*|\[::\]):(9090|3100|3000)$'; then
+    echo "Expected Prometheus, Loki and Grafana to listen on localhost only"
+    exit 1
+fi
+for monitoring_url in http://127.0.0.1:9090/-/ready http://127.0.0.1:3100/ready http://127.0.0.1:3000/api/health; do
+    monitoring_ok=0
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+        if curl -sf "$monitoring_url" >/dev/null; then
+            monitoring_ok=1
+            break
+        fi
+        sleep 1
+    done
+    if [ "$monitoring_ok" -ne 1 ]; then
+        echo "Timed out waiting for $monitoring_url"
+        exit 1
+    fi
+done
+
+echo "==> install alloy"
+server-tool install alloy --url https://monitor.example.test --api-key-file /etc/server-tool/monitoring-api.key -y
+systemctl is-active --quiet alloy
+[ "$(stat -c %a /etc/alloy/config.alloy)" = "640" ]
+[ "$(stat -c %G /etc/alloy/config.alloy)" = "alloy" ]
+grep -F "$monitoring_key" /etc/alloy/config.alloy >/dev/null
+grep -F 'https://monitor.example.test/api/v1/write' /etc/alloy/config.alloy >/dev/null
+grep -F 'https://monitor.example.test/loki/api/v1/push' /etc/alloy/config.alloy >/dev/null
+grep -F '/home/*/*/current/storage/logs/*.log' /etc/alloy/config.alloy >/dev/null
+grep -F '/home/*/*/log/*.log' /etc/alloy/config.alloy >/dev/null
+if grep -F 'releases/' /etc/alloy/config.alloy; then
+    echo "Expected Alloy to follow current/storage/logs instead of release directories"
+    exit 1
+fi
+test -f /var/lib/server-tool/monitoring/blackbox-targets.json
+
+echo "==> deployer storage symlink keeps the same log file"
+deploy_sim="$(mktemp -d)"
+mkdir -p "$deploy_sim/shared/storage/logs" "$deploy_sim/releases/release1" "$deploy_sim/releases/release2"
+echo 'laravel log' > "$deploy_sim/shared/storage/logs/laravel.log"
+ln -s ../../shared/storage "$deploy_sim/releases/release1/storage"
+ln -s ../../shared/storage "$deploy_sim/releases/release2/storage"
+ln -s releases/release1 "$deploy_sim/current"
+deploy_inode="$(stat -c %i "$deploy_sim/current/storage/logs/laravel.log")"
+ln -sfn releases/release2 "$deploy_sim/current"
+[ "$(stat -c %i "$deploy_sim/current/storage/logs/laravel.log")" = "$deploy_inode" ]
+test -f "$deploy_sim/current/storage/logs/laravel.log"
+rm -rf "$deploy_sim"
+
 echo "==> install php ${php_version}"
 server-tool install php -y "$php_version"
 large_files_php_conf="/etc/php/${php_version}/fpm/conf.d/99-server-tool-large-files.ini"
@@ -289,7 +470,18 @@ server-tool install redis -y
 echo "==> install meilisearch"
 server-tool install meilisearch -y
 systemctl is-active --quiet meilisearch
-curl -sf http://127.0.0.1:7700/health >/dev/null
+meili_ok=0
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+    if curl -sf http://127.0.0.1:7700/health >/dev/null; then
+        meili_ok=1
+        break
+    fi
+    sleep 1
+done
+if [ "$meili_ok" -ne 1 ]; then
+    echo "Timed out waiting for Meilisearch"
+    exit 1
+fi
 
 echo "==> install postgresql ${postgres_version}"
 server-tool install postgresql -y "$postgres_version"
@@ -391,7 +583,7 @@ fi
 test ! -e /home/testdev/remotefail
 
 echo "==> create-app testdev demo -d dump_testdb -t pgsql"
-server-tool create-app testdev demo -d dump_testdb -t pgsql -y
+server-tool create-app testdev demo -d dump_testdb -t pgsql -p "$php_version" -y
 
 echo "==> verify application layout"
 test -d /home/testdev/demo/install/public
@@ -426,6 +618,11 @@ grep -q '^DB_DATABASE=dump_testdb' /home/testdev/demo/.env.db
 
 echo "==> list-apps"
 server-tool list-apps | grep -qxF 'testdev demo'
+getfacl /home/testdev/demo/log | grep -q 'user:alloy:r-x'
+if grep -q 'demo.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json; then
+    echo "Expected no HTTP probe before a dotted domain exists"
+    exit 1
+fi
 
 echo "==> dump-db and restore-db testdev demo"
 db_pass="$(sed -n 's/^DB_PASSWORD=//p' /home/testdev/demo/.env.db | head -1)"
@@ -442,7 +639,7 @@ server-tool create-db smoke_mysqldb -t mysql -y
 mysql -N -B -e "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'smoke_mysqldb'" | grep -qx 1
 
 echo "==> create-app testdev mysqlapp -d smoke_mysqlapp -t mysql"
-server-tool create-app testdev mysqlapp -d smoke_mysqlapp -t mysql -y
+server-tool create-app testdev mysqlapp -d smoke_mysqlapp -t mysql -p "$php_version" -y
 test -f /home/testdev/mysqlapp/.env.db
 grep -q '^DB_CONNECTION=mysql' /home/testdev/mysqlapp/.env.db
 grep -q '^DB_HOST=127.0.0.1' /home/testdev/mysqlapp/.env.db
@@ -578,6 +775,8 @@ test -f /home/testdev/demo/nginx/ssl/demo.example.test.pem
 test -f /home/testdev/demo/nginx/ssl/demo.example.test.key
 grep -q "return 301 https" /home/testdev/demo/nginx/demo.conf
 
+grep -q 'https://demo.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json
+
 echo "==> enable-ssl testdev demo --self-signed --renew"
 server-tool enable-ssl testdev demo -d demo.example.test --self-signed --renew -y
 openssl x509 -in /home/testdev/demo/nginx/ssl/demo.example.test.pem -noout -checkend $((86400 * 365 * 14))
@@ -593,6 +792,7 @@ grep -q "php${php_version}-fpm-testdev-demo.sock" /home/testdev/demo/nginx/demo.
 test -f /home/testdev/demo/nginx/ssl/demo.example.test.pem
 test -f /home/testdev/demo/nginx/ssl/demo.example.test.key
 server-tool list-domains testdev demo | grep -qxF extra.example.test
+grep -q 'https://extra.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json
 if server-tool add-domain testdev demo extra.example.test -y; then
     echo "Expected duplicate add-domain to fail"
     exit 1
@@ -615,6 +815,11 @@ if server-tool remove-domain testdev demo demo.example.test -y; then
     exit 1
 fi
 server-tool list-domains testdev demo | grep -qxF demo.example.test
+grep -q 'https://demo.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json
+if grep -q 'extra.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json; then
+    echo "Expected the removed domain to leave the HTTP probes"
+    exit 1
+fi
 
 echo "==> enable-scheduler testdev demo"
 test -d /home/testdev/demo/cron
@@ -641,6 +846,8 @@ test ! -e "/etc/php/${php_version}/fpm/pool.d/testdev_demo.conf"
 test ! -e /etc/supervisor/conf.d/testdev_demo.d
 ! grep -qF '# BEGIN server-tool app: testdev/demo' <<< "$(crontab -u testdev -l 2>/dev/null || true)"
 test -d /home/testdev/demo2
+grep -q '"application": "demo2"' /var/lib/server-tool/monitoring/blackbox-targets.json
+grep -q 'https://demo.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json
 test -f /home/testdev/demo2/nginx/demo2.conf
 test -f /home/testdev/demo2/php-fpm/demo2.conf
 grep -q "php${php_version}-fpm-testdev-demo2.sock" /home/testdev/demo2/nginx/demo2.conf
@@ -716,6 +923,10 @@ test ! -e "/etc/php/${php_version}/fpm/pool.d/testdev_demo2.conf"
 test ! -e "/etc/php/${other_php_version}/fpm/pool.d/testdev_demo2.conf"
 test ! -e /etc/supervisor/conf.d/testdev_demo2.d
 ! grep -qF '# BEGIN server-tool app: testdev/demo2' <<< "$(crontab -u testdev -l 2>/dev/null || true)"
+if grep -q 'demo.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json; then
+    echo "Expected HTTP probes to drop the deleted application"
+    exit 1
+fi
 
 echo "==> backup-app without config fails"
 if server-tool backup-app testdev demo -y; then

@@ -54,6 +54,10 @@ server-tool install postgresql -y 17 18
 server-tool install memcached
 server-tool install redis
 server-tool install meilisearch
+server-tool install monitoring -d grafana.example.com -e admin@example.com
+server-tool install monitoring -d grafana.example.com -e admin@example.com -y
+server-tool install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key
+server-tool install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key -y
 server-tool install aws
 server-tool install aws my-backups
 server-tool install aws my-backups -y

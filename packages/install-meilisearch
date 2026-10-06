@@ -23,10 +23,14 @@ if [ "$arch" = "amd64" ]; then
   apt install -y meilisearch
 else
   apt-get -y install curl ca-certificates
-  echo "Official Meilisearch APT repo is amd64-only; installing the arm64 binary from GitHub."
-  curl -fL --retry 3 -o /usr/local/bin/meilisearch \
-    https://github.com/meilisearch/meilisearch/releases/latest/download/meilisearch-linux-aarch64
-  chmod 755 /usr/local/bin/meilisearch
+  if [ -x /usr/local/bin/meilisearch ]; then
+    echo "Meilisearch binary already installed, leaving it unchanged."
+  else
+    echo "Official Meilisearch APT repo is amd64-only; installing the arm64 binary from GitHub."
+    curl -fL --retry 3 -o /usr/local/bin/meilisearch \
+      https://github.com/meilisearch/meilisearch/releases/latest/download/meilisearch-linux-aarch64
+    chmod 755 /usr/local/bin/meilisearch
+  fi
 fi
 
 meili_bin="$(command -v meilisearch || true)"

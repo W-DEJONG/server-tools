@@ -65,4 +65,5 @@ if [ -e "$app_root" ] || [ -e "$nginx_conf" ] || [ -e "$supervisor_link" ]; then
     exit 1
 fi
 
+sync_app_monitoring
 echo "Application $app_name has been removed."

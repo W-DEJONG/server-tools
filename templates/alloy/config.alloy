@@ -1,0 +1,97 @@
+prometheus.exporter.unix "node" {
+  enable_collectors = ["systemd"]
+
+  systemd {
+    enable_restarts = false
+    start_time      = false
+    task_metrics    = false
+  }
+}
+
+prometheus.scrape "node" {
+  targets         = prometheus.exporter.unix.node.targets
+  forward_to      = [prometheus.remote_write.metrics.receiver]
+  scrape_interval = "30s"
+  job_name        = "node"
+}
+
+discovery.file "http_checks" {
+  files            = ["/var/lib/server-tool/monitoring/blackbox-targets.json"]
+  refresh_interval = "30s"
+}
+
+prometheus.exporter.blackbox "http" {
+  config  = `{ modules: { http_2xx: { prober: http, timeout: 10s } } }`
+  targets = discovery.file.http_checks.targets
+}
+
+prometheus.scrape "http_checks" {
+  targets         = prometheus.exporter.blackbox.http.targets
+  forward_to      = [prometheus.remote_write.metrics.receiver]
+  scrape_interval = "30s"
+  job_name        = "http_checks"
+}
+
+prometheus.remote_write "metrics" {
+  endpoint {
+    url = "__MONITORING_URL__/api/v1/write"
+
+    headers = {
+      "X-Api-Key" = "__API_KEY__",
+    }
+  }
+
+  external_labels = {
+    server = "__SERVER_NAME__",
+  }
+}
+
+loki.write "logs" {
+  endpoint {
+    url = "__MONITORING_URL__/loki/api/v1/push"
+
+    headers = {
+      "X-Api-Key" = "__API_KEY__",
+    }
+  }
+
+  external_labels = {
+    server = "__SERVER_NAME__",
+  }
+}
+
+loki.source.journal "system" {
+  labels = {
+    logtype = "journal",
+  }
+  forward_to = [loki.write.logs.receiver]
+}
+
+loki.process "app_logs" {
+  stage.regex {
+    source     = "filename"
+    expression = "^/home/(?P<username>[^/]+)/(?P<application>[^/]+)/"
+  }
+
+  stage.labels {
+    values = {
+      username    = "",
+      application = "",
+    }
+  }
+
+  forward_to = [loki.write.logs.receiver]
+}
+
+loki.source.file "app_logs" {
+  targets = [
+    { __path__ = "/home/*/*/log/*.log", logtype = "server" },
+    { __path__ = "/home/*/*/current/storage/logs/*.log", logtype = "laravel" },
+  ]
+  forward_to = [loki.process.app_logs.receiver]
+
+  file_match {
+    enabled     = true
+    sync_period = "10s"
+  }
+}

@@ -1308,7 +1308,7 @@ require_supervisor() {
     fi
   fi
 
-  if ! supervisorctl status >/dev/null 2>&1; then
+  if ! supervisorctl version >/dev/null 2>&1; then
     echo "Error: cannot talk to the Supervisor daemon."
     exit 1
   fi
@@ -2130,6 +2130,202 @@ app_backup_cron_file() {
 
 certbot_timer_unit_exists() {
   systemctl cat certbot.timer >/dev/null 2>&1
+}
+
+ensure_grafana_repo() {
+  apt-get -y install curl ca-certificates
+  install -d -m 755 /etc/apt/keyrings
+  curl -fsSL https://apt.grafana.com/gpg-full.key -o /etc/apt/keyrings/grafana.asc
+  chmod 644 /etc/apt/keyrings/grafana.asc
+  echo "deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stable main" > /etc/apt/sources.list.d/grafana.list
+  apt-get update
+}
+
+list_server_tool_apps() {
+  local user_home username app_dir app_name apps=()
+
+  if [ ! -d /home ]; then
+    return 0
+  fi
+
+  for user_home in /home/*; do
+    [ -d "$user_home" ] || continue
+    username="$(basename "$user_home")"
+
+    case "$username" in
+      ""|*/*|root|admin|www-data|nginx|nobody|daemon)
+        continue
+        ;;
+    esac
+
+    for app_dir in "$user_home"/*; do
+      [ -d "$app_dir" ] || continue
+      app_name="$(basename "$app_dir")"
+
+      case "$app_name" in
+        ""|*/*|.|..|.ssh)
+          continue
+          ;;
+      esac
+
+      if [ -f "${app_dir}/nginx/${app_name}.conf" ]; then
+        apps+=("${username} ${app_name}")
+      fi
+    done
+  done
+
+  if [ ${#apps[@]} -eq 0 ]; then
+    return 0
+  fi
+
+  printf '%s\n' "${apps[@]}" | sort
+}
+
+monitoring_json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '%s' "$value"
+}
+
+monitoring_blackbox_targets_file() {
+  printf '%s\n' /var/lib/server-tool/monitoring/blackbox-targets.json
+}
+
+write_monitoring_blackbox_targets() {
+  local file tmp dir username app_name conf names domain scheme url probe_name server
+  local entries=() entry index=0
+
+  file="$(monitoring_blackbox_targets_file)"
+  dir="$(dirname "$file")"
+  tmp="$(mktemp)"
+  server="$(hostname -s)"
+  mkdir -p "$dir"
+
+  while read -r username app_name; do
+    [ -n "$username" ] || continue
+    [ -n "$app_name" ] || continue
+    conf="/home/${username}/${app_name}/nginx/${app_name}.conf"
+    [ -f "$conf" ] || continue
+    names="$(app_server_names_from_nginx "$conf")"
+    scheme="http"
+    if grep -qE '^[[:space:]]*listen[[:space:]]+[^;]*443' "$conf"; then
+      scheme="https"
+    fi
+    for domain in $names; do
+      case "$domain" in
+        *.*)
+          ;;
+        *)
+          continue
+          ;;
+      esac
+      url="${scheme}://${domain}"
+      probe_name="${username}_${app_name}_${domain}"
+      entries+=("$(cat <<EOF
+  {
+    "targets": ["$(monitoring_json_escape "$url")"],
+    "labels": {
+      "name": "$(monitoring_json_escape "$probe_name")",
+      "address": "$(monitoring_json_escape "$url")",
+      "module": "http_2xx",
+      "username": "$(monitoring_json_escape "$username")",
+      "application": "$(monitoring_json_escape "$app_name")",
+      "server": "$(monitoring_json_escape "$server")"
+    }
+  }
+EOF
+)")
+    done
+  done < <(list_server_tool_apps || true)
+
+  {
+    echo '['
+    if [ ${#entries[@]} -gt 0 ]; then
+      for entry in "${entries[@]}"; do
+        if [ "$index" -gt 0 ]; then
+          echo ','
+        fi
+        printf '%s' "$entry"
+        index=$((index + 1))
+      done
+      echo
+    fi
+    echo ']'
+  } > "$tmp"
+  mv "$tmp" "$file"
+  chmod 644 "$file"
+}
+
+grant_alloy_log_access() {
+  local username="$1"
+  local app_name="$2"
+  local alloy_user="alloy"
+  local app_root="/home/${username}/${app_name}"
+  local logs real dir
+
+  if ! id "$alloy_user" >/dev/null 2>&1; then
+    return 0
+  fi
+  if [ ! -d "$app_root" ]; then
+    return 0
+  fi
+
+  if ! command -v setfacl >/dev/null 2>&1; then
+    apt-get -y install acl
+  fi
+
+  setfacl -m "u:${alloy_user}:--x" "/home/${username}"
+  setfacl -m "u:${alloy_user}:--x" "$app_root"
+
+  if [ ! -d "$app_root/log" ]; then
+    mkdir -p "$app_root/log"
+    chown "$username:$username" "$app_root/log"
+  fi
+  setfacl -R -m "u:${alloy_user}:rX" "$app_root/log"
+  find "$app_root/log" -type d -exec setfacl -m "d:u:${alloy_user}:rX" {} +
+
+  for logs in "$app_root/current/storage/logs" "$app_root/shared/storage/logs"; do
+    [ -d "$logs" ] || continue
+    real="$(readlink -f "$logs")"
+    [ -d "$real" ] || continue
+    setfacl -R -m "u:${alloy_user}:rX" "$real"
+    find "$real" -type d -exec setfacl -m "d:u:${alloy_user}:rX" {} +
+    dir="$real"
+    while [ "$dir" != "/" ] && [ "$dir" != "/home" ]; do
+      setfacl -m "u:${alloy_user}:--x" "$dir"
+      dir="$(dirname "$dir")"
+    done
+  done
+}
+
+sync_app_monitoring() {
+  local username="${1:-}"
+  local app_name="${2:-}"
+
+  if ! command -v alloy >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [ -n "$username" ] && [ -n "$app_name" ]; then
+    grant_alloy_log_access "$username" "$app_name"
+  fi
+  write_monitoring_blackbox_targets
+}
+
+sync_all_app_monitoring() {
+  local username app_name
+
+  if ! command -v alloy >/dev/null 2>&1; then
+    return 0
+  fi
+
+  while read -r username app_name; do
+    [ -n "$username" ] || continue
+    [ -n "$app_name" ] || continue
+    grant_alloy_log_access "$username" "$app_name"
+  done < <(list_server_tool_apps || true)
+  write_monitoring_blackbox_targets
 }
 
 list_certbot_deploy_hooks() {

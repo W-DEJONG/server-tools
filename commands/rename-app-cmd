@@ -245,6 +245,8 @@ systemctl restart php${php_version}-fpm
 reload_nginx
 reload_supervisor
 
+sync_app_monitoring "$username" "$new_app"
+
 echo
 echo "Application '$old_app' has been renamed to '$new_app'."
 echo "  Root:        $new_root"

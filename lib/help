@@ -17,7 +17,7 @@ is_help_topic() {
 
 package_accepts_args() {
   case "$1" in
-    php|npm|postgresql|aws|composer) return 0 ;;
+    php|npm|postgresql|aws|composer|alloy|monitoring) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -1153,7 +1153,7 @@ install
 
 Install one or more application packages.
 
-Packages that accept extra arguments: php, npm, postgresql, aws, composer.
+Packages that accept extra arguments: php, npm, postgresql, aws, composer, alloy, monitoring.
 Multiple packages can be listed in one invocation.
 
 Usage:
@@ -1183,6 +1183,8 @@ Examples:
   server-tool install composer --version 2.8.12
   server-tool install aws my-backups -y
   server-tool install postgresql redis php 8.4 -y
+  server-tool install monitoring -d grafana.example.com -e admin@example.com -y
+  server-tool install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key -y
 
 Use: server-tool help install <package>
 EOF
@@ -1436,6 +1438,62 @@ Options:
 
 Examples:
   server-tool install redis -y
+EOF
+      ;;
+    alloy)
+      cat <<'EOF'
+install alloy
+
+Install Grafana Alloy and send host metrics, service status, HTTP checks
+and application logs to a monitoring server.
+
+The monitoring URL is the Grafana site, without a path. Alloy appends
+/api/v1/write and /loki/api/v1/push and sends the API key from the file
+in the X-Api-Key header. The key is stored only in /etc/alloy/config.alloy.
+
+Laravel logs are read through current/storage/logs, so a Deployer release
+switch keeps the same file. Existing applications are picked up during
+install. Later create-app, domain, SSL, rename and delete commands update
+the HTTP checks.
+
+Usage:
+  server-tool install alloy --url <https://host> --api-key-file <file> [-y]
+
+Options:
+  --url URL                  Grafana site, for example https://grafana.example.com
+  --api-key-file FILE        File that contains the monitoring API key
+  -y, --yes                  Skip confirmation prompts
+
+Examples:
+  server-tool install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key -y
+EOF
+      ;;
+    monitoring)
+      cat <<'EOF'
+install monitoring
+
+Install Prometheus, Loki and Grafana on this server, behind nginx.
+
+Grafana is served at https://<domain>/. Prometheus remote write is
+/api/v1/write and Loki push is /loki/api/v1/push. Both ingest locations
+require the X-Api-Key header. Grafana reads Prometheus and Loki on
+localhost. A generated API key and Grafana admin password are stored in
+/etc/server-tool/monitoring.conf. Repeating the install keeps that key
+and password.
+
+Certbot creates the certificate. The Server tools folder in Grafana
+contains the server, HTTP check and application log dashboards.
+
+Usage:
+  server-tool install monitoring -d <domain> -e <email> [-y]
+
+Options:
+  -d, --domain DOMAIN        Public Grafana hostname
+  -e, --email ADDRESS        Let's Encrypt contact email
+  -y, --yes                  Skip confirmation prompts
+
+Examples:
+  server-tool install monitoring -d grafana.example.com -e admin@example.com -y
 EOF
       ;;
     *)
