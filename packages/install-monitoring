@@ -59,18 +59,24 @@ confirm_or_exit "This will install Prometheus, Loki and Grafana for ${domain}. D
 echo "Installing Prometheus, Loki and Grafana..."
 ensure_grafana_repo
 
+install_nginx=0
 if ! command -v nginx >/dev/null 2>&1; then
   ensure_nginx_repo
-  apt-get install -y nginx certbot python3-certbot-nginx ufw
+  install_nginx=1
+fi
+
+packages=(prometheus loki grafana certbot python3-certbot-nginx)
+if [ "$install_nginx" -eq 1 ]; then
+  packages+=(nginx ufw)
+fi
+apt_get install -y "${packages[@]}"
+
+if [ "$install_nginx" -eq 1 ]; then
   systemctl enable nginx
   systemctl start nginx
   ufw allow 80/tcp
   ufw allow 443/tcp
-else
-  apt-get install -y certbot python3-certbot-nginx
 fi
-
-apt-get install -y prometheus loki grafana
 
 api_key=""
 grafana_password=""
