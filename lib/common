@@ -2223,6 +2223,30 @@ install_grafana_dashboards() {
   install -m 644 -o grafana -g grafana "$src/dashboards/logs.json" "$dest/logs.json"
 }
 
+install_alloy_config() {
+  local url="$1"
+  local api_key="$2"
+  local server_name="$3"
+  local tmp
+
+  tmp="$(mktemp)"
+  sed \
+    -e "s|__MONITORING_URL__|${url}|g" \
+    -e "s|__API_KEY__|${api_key}|g" \
+    -e "s|__SERVER_NAME__|${server_name}|g" \
+    "$SERVER_TOOL_ROOT/templates/alloy/config.alloy" > "$tmp"
+
+  if alloy validate --help >/dev/null 2>&1; then
+    alloy validate "$tmp"
+  else
+    alloy fmt "$tmp" >/dev/null
+  fi
+
+  install -d -m 755 /etc/alloy
+  install -m 640 -o root -g alloy "$tmp" /etc/alloy/config.alloy
+  rm -f "$tmp"
+}
+
 monitoring_blackbox_targets_file() {
   printf '%s\n' /var/lib/server-tool/monitoring/blackbox-targets.json
 }

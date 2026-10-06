@@ -86,28 +86,71 @@ loki.source.journal "system" {
   forward_to = [loki.write.logs.receiver]
 }
 
+loki.process "laravel_logs" {
+  // Grafana's recommended first line for bracketed timestamps, which is how
+  // Laravel starts each entry: [2026-10-06 08:00:59] staging.ERROR: ...
+  stage.multiline {
+    firstline     = `^\[\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}:\d{2}\]`
+    max_wait_time = "3s"
+    max_lines     = 1000
+  }
+
+  forward_to = [loki.process.app_logs.receiver]
+}
+
 loki.process "app_logs" {
   stage.regex {
     source     = "filename"
-    expression = "^/home/(?P<username>[^/]+)/(?P<application>[^/]+)/"
+    expression = `^/home/(?P<username>[^/]+)/(?P<application>[^/]+)/`
+  }
+
+  stage.regex {
+    source     = "filename"
+    expression = `^.*/(?P<logfile>[^/]+)$`
+  }
+
+  stage.regex {
+    expression = `^\[[^\]]+\] \S+\.(?P<level>DEBUG|INFO|NOTICE|WARNING|ERROR|CRITICAL|ALERT|EMERGENCY):`
+  }
+
+  stage.regex {
+    expression = `^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2} \[(?P<nginx_level>emerg|alert|crit|error|warn|notice|info|debug)\]`
+  }
+
+  stage.template {
+    source   = "level"
+    template = `{{ if .level }}{{ .level }}{{ else if eq .nginx_level "warn" }}WARNING{{ else if eq .nginx_level "error" }}ERROR{{ else if eq .nginx_level "crit" }}CRITICAL{{ else if eq .nginx_level "emerg" }}EMERGENCY{{ else if eq .nginx_level "alert" }}ALERT{{ else if eq .nginx_level "debug" }}DEBUG{{ else if eq .nginx_level "info" }}INFO{{ else if eq .nginx_level "notice" }}NOTICE{{ else }}-{{ end }}`
   }
 
   stage.labels {
     values = {
       username    = "",
       application = "",
+      logfile     = "",
+      level       = "",
     }
   }
 
   forward_to = [loki.write.logs.receiver]
 }
 
-loki.source.file "app_logs" {
+loki.source.file "server_logs" {
   targets = [
     { __path__ = "/home/*/*/log/*.log", logtype = "server" },
-    { __path__ = "/home/*/*/current/storage/logs/*.log", logtype = "laravel" },
   ]
   forward_to = [loki.process.app_logs.receiver]
+
+  file_match {
+    enabled     = true
+    sync_period = "10s"
+  }
+}
+
+loki.source.file "laravel_logs" {
+  targets = [
+    { __path__ = "/home/*/*/current/storage/logs/*.log", logtype = "laravel" },
+  ]
+  forward_to = [loki.process.laravel_logs.receiver]
 
   file_match {
     enabled     = true

@@ -62,6 +62,32 @@
         "allValue": ".*",
         "multi": false,
         "sort": 1
+      },
+      {
+        "name": "logfile",
+        "label": "File",
+        "type": "query",
+        "datasource": { "type": "loki", "uid": "loki" },
+        "query": "label_values(logfile)",
+        "definition": "label_values(logfile)",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false,
+        "sort": 1
+      },
+      {
+        "name": "level",
+        "label": "Level",
+        "type": "query",
+        "datasource": { "type": "loki", "uid": "loki" },
+        "query": "label_values(level)",
+        "definition": "label_values(level)",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false,
+        "sort": 1
       }
     ]
   },
@@ -75,7 +101,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "{server=~\"$server\", username=~\"$username\", application=~\"$application\", logtype=~\"$logtype\"}"
+          "expr": "{server=~\"$server\", username=~\"$username\", application=~\"$application\", logtype=~\"$logtype\", logfile=~\"$logfile\", level=~\"$level\"}"
         }
       ],
       "options": {

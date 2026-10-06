@@ -76,7 +76,7 @@ command_summary() {
     switch-php) echo "Switch an application to another PHP version" ;;
     test-backup) echo "Upload a small test object to verify S3 backup config" ;;
     update-grafana) echo "Replace the shipped Grafana dashboards with the current templates" ;;
-    update-probes) echo "Refresh Alloy HTTP probe targets from the installed applications" ;;
+    update-probes) echo "Update Alloy config, application log access, and HTTP probes" ;;
     *) echo "No summary available" ;;
   esac
 }
@@ -1166,7 +1166,9 @@ EOF
       cat <<'EOF'
 update-probes
 
-Refresh HTTP probes and Alloy's read access to application logs.
+Install the current Alloy config template, refresh HTTP probes and restore
+Alloy's read access to application logs. The existing monitoring URL and
+API key are retained, and Alloy is restarted after validation.
 Each dotted nginx server_name becomes a probe labeled with that domain.
 Nginx and Laravel logs are read from log/ and current/storage/logs.
 Run this on an application server after server-tool self-update.
@@ -1493,7 +1495,9 @@ The monitoring URL is the Grafana site, without a path. Alloy appends
 in the X-Api-Key header. The key is stored only in /etc/alloy/config.alloy.
 
 Laravel logs are read through current/storage/logs, so a Deployer release
-switch keeps the same file. Existing applications are picked up during
+switch keeps the same file. A Laravel entry and its stack trace stay one
+event, labeled with its level (ERROR, INFO, WARNING). Nginx error lines
+get the same level labels. Existing applications are picked up during
 install. Later create-app, domain, SSL, rename and delete commands update
 the HTTP checks.
 

@@ -13,11 +13,30 @@ if ! command -v alloy >/dev/null 2>&1; then
   exit 1
 fi
 
-confirm_or_exit "This will refresh the HTTP probe targets for Grafana Alloy. Continue? (y/n): "
+config="/etc/alloy/config.alloy"
+if [ ! -f "$config" ]; then
+  echo "Error: Alloy config not found: $config"
+  exit 1
+fi
 
+url="$(sed -n 's|^[[:space:]]*url[[:space:]]*=[[:space:]]*"\(https://[^"]*\)/api/v1/write"[[:space:]]*$|\1|p' "$config" | sed -n '1p')"
+api_key="$(sed -n 's|^[[:space:]]*"X-Api-Key"[[:space:]]*=[[:space:]]*"\([^"]*\)",\{0,1\}[[:space:]]*$|\1|p' "$config" | sed -n '1p')"
+server_name="$(hostname -s)"
+
+if [ -z "$url" ] || [ -z "$api_key" ]; then
+  echo "Error: could not read the monitoring URL or API key from $config."
+  echo "Run server-tool install alloy once to repair the configuration."
+  exit 1
+fi
+
+confirm_or_exit "This will update Alloy, application log access and HTTP probes. Continue? (y/n): "
+
+install_alloy_config "$url" "$api_key" "$server_name"
 sync_all_app_monitoring
+systemctl restart alloy
 
 echo
-echo "HTTP probe targets and application log access updated."
+echo "Grafana Alloy, application log access and HTTP probes updated."
+echo "  Config: $config"
 echo "  File: $(monitoring_blackbox_targets_file)"
 echo "Alloy picks up log files and probe targets within 30 seconds."

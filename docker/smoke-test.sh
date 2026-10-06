@@ -353,6 +353,8 @@ printf '{}\n' > /var/lib/grafana/dashboards/server-tools/http.json
 server-tool update-grafana -y
 grep -q '"legendFormat": "{{domain}}"' /var/lib/grafana/dashboards/server-tools/http.json
 grep -q 'label_values(username)' /var/lib/grafana/dashboards/server-tools/logs.json
+grep -q 'label_values(logfile)' /var/lib/grafana/dashboards/server-tools/logs.json
+grep -q 'label_values(level)' /var/lib/grafana/dashboards/server-tools/logs.json
 grep -q 'GF_AUTH_ANONYMOUS_ENABLED=false' /etc/systemd/system/grafana-server.service.d/server-tool.conf
 grep -q 'GF_SERVER_ROOT_URL=https://monitor.example.test/' /etc/systemd/system/grafana-server.service.d/server-tool.conf
 systemctl is-active --quiet prometheus
@@ -400,6 +402,9 @@ grep -F "$monitoring_key" /etc/alloy/config.alloy >/dev/null
 grep -F 'https://monitor.example.test/api/v1/write' /etc/alloy/config.alloy >/dev/null
 grep -F 'https://monitor.example.test/loki/api/v1/push' /etc/alloy/config.alloy >/dev/null
 grep -F '/home/*/*/current/storage/logs/*.log' /etc/alloy/config.alloy >/dev/null
+grep -F 'stage.multiline' /etc/alloy/config.alloy >/dev/null
+grep -F 'logfile' /etc/alloy/config.alloy >/dev/null
+grep -F '(?P<level>DEBUG|INFO|NOTICE|WARNING|ERROR|CRITICAL|ALERT|EMERGENCY)' /etc/alloy/config.alloy >/dev/null
 grep -F '/home/*/*/log/*.log' /etc/alloy/config.alloy >/dev/null
 if grep -F 'releases/' /etc/alloy/config.alloy; then
     echo "Expected Alloy to follow current/storage/logs instead of release directories"

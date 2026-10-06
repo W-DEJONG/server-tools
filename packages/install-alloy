@@ -82,22 +82,9 @@ if getent group adm >/dev/null; then
   usermod -a -G adm alloy
 fi
 
-install -d -m 755 /etc/alloy
-sed \
-  -e "s|__MONITORING_URL__|${url}|g" \
-  -e "s|__API_KEY__|${api_key}|g" \
-  -e "s|__SERVER_NAME__|${server_name}|g" \
-  "$SERVER_TOOL_ROOT/templates/alloy/config.alloy" > /etc/alloy/config.alloy
-chown root:alloy /etc/alloy/config.alloy
-chmod 640 /etc/alloy/config.alloy
+install_alloy_config "$url" "$api_key" "$server_name"
 
 sync_all_app_monitoring
-
-if alloy validate --help >/dev/null 2>&1; then
-  alloy validate /etc/alloy/config.alloy
-else
-  alloy fmt /etc/alloy/config.alloy >/dev/null
-fi
 
 systemctl enable alloy
 systemctl restart alloy
