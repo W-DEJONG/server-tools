@@ -2259,7 +2259,8 @@ write_monitoring_blackbox_targets() {
   dir="$(dirname "$file")"
   tmp="$(mktemp)"
   server="$(hostname -s)"
-  mkdir -p "$dir"
+  install -d -m 755 /var/lib/server-tool "$dir"
+  chmod 755 /var/lib/server-tool "$dir"
 
   while read -r username app_name; do
     [ -n "$username" ] || continue
