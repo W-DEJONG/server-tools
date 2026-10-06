@@ -58,6 +58,8 @@ server-tool install monitoring -d grafana.example.com -e admin@example.com
 server-tool install monitoring -d grafana.example.com -e admin@example.com -y
 server-tool install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key
 server-tool install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key -y
+server-tool update-grafana
+server-tool update-grafana -y
 server-tool install aws
 server-tool install aws my-backups
 server-tool install aws my-backups -y

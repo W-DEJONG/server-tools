@@ -140,13 +140,9 @@ ExecStart=${loki_bin} -config.file=/etc/loki/server-tool.yaml
 EOF
 loki -config.file=/etc/loki/server-tool.yaml -verify-config
 
-install -d -o grafana -g grafana /var/lib/grafana/dashboards/server-tools
-mkdir -p /etc/grafana/provisioning/datasources /etc/grafana/provisioning/dashboards
+mkdir -p /etc/grafana/provisioning/datasources
 install -m 644 -o root -g grafana "$SERVER_TOOL_ROOT/templates/grafana/datasources.yaml" /etc/grafana/provisioning/datasources/server-tool.yaml
-install -m 644 -o root -g grafana "$SERVER_TOOL_ROOT/templates/grafana/dashboards.yaml" /etc/grafana/provisioning/dashboards/server-tool.yaml
-install -m 644 -o grafana -g grafana "$SERVER_TOOL_ROOT/templates/grafana/dashboards/server.json" /var/lib/grafana/dashboards/server-tools/server.json
-install -m 644 -o grafana -g grafana "$SERVER_TOOL_ROOT/templates/grafana/dashboards/http.json" /var/lib/grafana/dashboards/server-tools/http.json
-install -m 644 -o grafana -g grafana "$SERVER_TOOL_ROOT/templates/grafana/dashboards/logs.json" /var/lib/grafana/dashboards/server-tools/logs.json
+install_grafana_dashboards
 
 install -d /etc/systemd/system/grafana-server.service.d
 cat > /etc/systemd/system/grafana-server.service.d/server-tool.conf <<EOF

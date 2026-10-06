@@ -75,6 +75,7 @@ command_summary() {
     stop-queue) echo "Stop an application's Laravel queue Supervisor program" ;;
     switch-php) echo "Switch an application to another PHP version" ;;
     test-backup) echo "Upload a small test object to verify S3 backup config" ;;
+    update-grafana) echo "Replace the shipped Grafana dashboards with the current templates" ;;
     *) echo "No summary available" ;;
   esac
 }
@@ -1140,6 +1141,26 @@ Examples:
       server-tool test-backup -y
 EOF
       ;;
+    update-grafana)
+      cat <<'EOF'
+update-grafana
+
+Replace the shipped Server tools dashboards with the templates from this
+server-tool install. Datasources, passwords and nginx are left unchanged.
+Grafana reloads the files within 30 seconds.
+
+Run this on the monitoring server after server-tool self-update.
+
+Usage:
+  server-tool update-grafana [-y]
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool update-grafana -y
+EOF
+      ;;
     *)
       printf '%s\n\n%s\n\nNo detailed help is available for this command.\n' "$1" "$(command_summary "$1")"
       ;;
@@ -1482,7 +1503,8 @@ localhost. A generated API key and Grafana admin password are stored in
 and password.
 
 Certbot creates the certificate. The Server tools folder in Grafana
-contains the server, HTTP check and application log dashboards.
+contains the server, HTTP check and application log dashboards. Refresh
+those dashboards later with: server-tool update-grafana
 
 Usage:
   server-tool install monitoring -d <domain> -e <email> [-y]

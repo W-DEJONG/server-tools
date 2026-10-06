@@ -2211,6 +2211,18 @@ monitoring_json_escape() {
   printf '%s' "$value"
 }
 
+install_grafana_dashboards() {
+  local src="$SERVER_TOOL_ROOT/templates/grafana"
+  local dest="/var/lib/grafana/dashboards/server-tools"
+
+  install -d -o grafana -g grafana "$dest"
+  mkdir -p /etc/grafana/provisioning/dashboards
+  install -m 644 -o root -g grafana "$src/dashboards.yaml" /etc/grafana/provisioning/dashboards/server-tool.yaml
+  install -m 644 -o grafana -g grafana "$src/dashboards/server.json" "$dest/server.json"
+  install -m 644 -o grafana -g grafana "$src/dashboards/http.json" "$dest/http.json"
+  install -m 644 -o grafana -g grafana "$src/dashboards/logs.json" "$dest/logs.json"
+}
+
 monitoring_blackbox_targets_file() {
   printf '%s\n' /var/lib/server-tool/monitoring/blackbox-targets.json
 }

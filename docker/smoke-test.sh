@@ -75,6 +75,11 @@ server-tool help app-structure | grep -q 'current'
 echo "==> help install alloy and monitoring"
 server-tool help install alloy | grep -q -- '--api-key-file'
 server-tool help install monitoring | grep -q -- '-d <domain>'
+server-tool help update-grafana | grep -q 'Usage:'
+if server-tool update-grafana -y; then
+    echo "Expected update-grafana to fail before monitoring is installed"
+    exit 1
+fi
 
 echo "==> install alloy and monitoring require arguments"
 if server-tool install alloy -y; then
@@ -339,6 +344,9 @@ grep -q 'http://127.0.0.1:9090' /etc/grafana/provisioning/datasources/server-too
 grep -q 'http://127.0.0.1:3100' /etc/grafana/provisioning/datasources/server-tool.yaml
 grep -q 'server-tools-server' /var/lib/grafana/dashboards/server-tools/server.json
 grep -q 'probe_success' /var/lib/grafana/dashboards/server-tools/http.json
+printf '{}\n' > /var/lib/grafana/dashboards/server-tools/http.json
+server-tool update-grafana -y
+grep -q '"legendFormat": "{{domain}}"' /var/lib/grafana/dashboards/server-tools/http.json
 grep -q 'label_values(username)' /var/lib/grafana/dashboards/server-tools/logs.json
 grep -q 'GF_AUTH_ANONYMOUS_ENABLED=false' /etc/systemd/system/grafana-server.service.d/server-tool.conf
 grep -q 'GF_SERVER_ROOT_URL=https://monitor.example.test/' /etc/systemd/system/grafana-server.service.d/server-tool.conf

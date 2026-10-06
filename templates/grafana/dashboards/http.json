@@ -36,8 +36,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "probe_success{server=~\"$server\"}",
-          "legendFormat": "{{instance}}"
+          "expr": "label_replace(probe_success{server=~\"$server\"}, \"domain\", \"$1\", \"instance\", \"https?://([^/:]+).*\")",
+          "legendFormat": "{{domain}}"
         }
       ],
       "fieldConfig": {
@@ -61,8 +61,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "probe_duration_seconds{server=~\"$server\"}",
-          "legendFormat": "{{instance}}"
+          "expr": "label_replace(probe_duration_seconds{server=~\"$server\"}, \"domain\", \"$1\", \"instance\", \"https?://([^/:]+).*\")",
+          "legendFormat": "{{domain}}"
         }
       ],
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
@@ -76,8 +76,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "probe_http_status_code{server=~\"$server\"}",
-          "legendFormat": "{{instance}}"
+          "expr": "label_replace(probe_http_status_code{server=~\"$server\"}, \"domain\", \"$1\", \"instance\", \"https?://([^/:]+).*\")",
+          "legendFormat": "{{domain}}"
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none", "decimals": 0 }, "overrides": [] }
