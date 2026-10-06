@@ -32,11 +32,11 @@
       "type": "stat",
       "title": "Probe success",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
       "targets": [
         {
           "refId": "A",
-          "expr": "label_replace(probe_success{server=~\"$server\"}, \"domain\", \"$1\", \"instance\", \"https?://([^/:]+).*\")",
+          "expr": "label_replace(probe_success{server=~\"$server\"}, \"domain\", \"$$1\", \"instance\", \"https?://([^/:]+).*\")",
           "legendFormat": "{{domain}}"
         }
       ],
@@ -50,18 +50,27 @@
         },
         "overrides": []
       },
-      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "wideLayout": true,
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "text": { "titleSize": 16, "valueSize": 28 }
+      }
     },
     {
       "id": 2,
       "type": "timeseries",
       "title": "Response time",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
       "targets": [
         {
           "refId": "A",
-          "expr": "label_replace(probe_duration_seconds{server=~\"$server\"}, \"domain\", \"$1\", \"instance\", \"https?://([^/:]+).*\")",
+          "expr": "label_replace(probe_duration_seconds{server=~\"$server\"}, \"domain\", \"$$1\", \"instance\", \"https?://([^/:]+).*\")",
           "legendFormat": "{{domain}}"
         }
       ],
@@ -72,11 +81,11 @@
       "type": "timeseries",
       "title": "HTTP status",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
       "targets": [
         {
           "refId": "A",
-          "expr": "label_replace(probe_http_status_code{server=~\"$server\"}, \"domain\", \"$1\", \"instance\", \"https?://([^/:]+).*\")",
+          "expr": "label_replace(probe_http_status_code{server=~\"$server\"}, \"domain\", \"$$1\", \"instance\", \"https?://([^/:]+).*\")",
           "legendFormat": "{{domain}}"
         }
       ],
