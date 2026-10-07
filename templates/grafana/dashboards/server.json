@@ -72,18 +72,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "node_load1{server=~\"$server\"}",
-          "legendFormat": "{{server}} 1m"
-        },
-        {
-          "refId": "B",
-          "expr": "node_load5{server=~\"$server\"}",
-          "legendFormat": "{{server}} 5m"
-        },
-        {
-          "refId": "C",
-          "expr": "node_load15{server=~\"$server\"}",
-          "legendFormat": "{{server}} 15m"
+          "expr": "node_load1{server=~\"$server\",server!=\"\"}",
+          "legendFormat": "{{server}}"
         }
       ],
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
