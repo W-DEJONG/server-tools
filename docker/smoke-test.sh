@@ -256,9 +256,15 @@ large_files_nginx_conf=/etc/nginx/conf.d/10-server-tool-large-files.conf
 test -f "$large_files_nginx_conf"
 grep -qxF 'client_max_body_size 150M;' "$large_files_nginx_conf"
 grep -qxF 'fastcgi_read_timeout 180;' "$large_files_nginx_conf"
+request_log_format=/etc/nginx/conf.d/00-server-tool-log-format.conf
+test -f "$request_log_format"
+grep -qF 'log_format server_tool' "$request_log_format"
+grep -qF 'host=$host' "$request_log_format"
 nginx_config="$(nginx -T 2>&1)"
 grep -qF 'client_max_body_size 150M;' <<< "$nginx_config"
 grep -qF 'fastcgi_read_timeout 180;' <<< "$nginx_config"
+grep -qF 'log_format server_tool' <<< "$nginx_config"
+grep -qF 'host=$host' <<< "$nginx_config"
 
 echo "==> check-certbot-renew"
 server-tool check-certbot-renew -y
@@ -352,6 +358,9 @@ grep -q 'probe_success' /var/lib/grafana/dashboards/server-tools/http.json
 printf '{}\n' > /var/lib/grafana/dashboards/server-tools/http.json
 server-tool update-grafana -y
 grep -q '"legendFormat": "{{domain}}"' /var/lib/grafana/dashboards/server-tools/http.json
+grep -q '"title": "HTTP status"' /var/lib/grafana/dashboards/server-tools/http.json
+grep -q 'Requests per domain' /var/lib/grafana/dashboards/server-tools/http.json
+grep -q 'loki_process_custom_nginx_requests_total' /var/lib/grafana/dashboards/server-tools/http.json
 grep -q 'label_values(username)' /var/lib/grafana/dashboards/server-tools/logs.json
 grep -q 'label_values(logfile)' /var/lib/grafana/dashboards/server-tools/logs.json
 grep -q 'label_values(level)' /var/lib/grafana/dashboards/server-tools/logs.json
@@ -406,6 +415,9 @@ grep -F 'stage.multiline' /etc/alloy/config.alloy >/dev/null
 grep -F 'logfile' /etc/alloy/config.alloy >/dev/null
 grep -F '(?P<level>DEBUG|INFO|NOTICE|WARNING|ERROR|CRITICAL|ALERT|EMERGENCY)' /etc/alloy/config.alloy >/dev/null
 grep -F '/home/*/*/log/*.log' /etc/alloy/config.alloy >/dev/null
+grep -F '/home/*/*/log/access.log' /etc/alloy/config.alloy >/dev/null
+grep -F 'loki_process_custom_nginx_requests_total' /etc/alloy/config.alloy >/dev/null
+grep -F 'host=(?P<domain>' /etc/alloy/config.alloy >/dev/null
 if grep -F 'releases/' /etc/alloy/config.alloy; then
     echo "Expected Alloy to follow current/storage/logs instead of release directories"
     exit 1
@@ -620,6 +632,7 @@ getfacl /home/testdev/demo/releases | grep -q "default:user:nginx:r-x"
 test -f /home/testdev/demo/php-fpm/demo.conf
 test -f /home/testdev/demo/nginx/demo.conf
 grep -q "current/public" /home/testdev/demo/nginx/demo.conf
+grep -qF 'access_log /home/testdev/demo/log/access.log server_tool;' /home/testdev/demo/nginx/demo.conf
 grep -q "php${php_version}-fpm-testdev-demo.sock" /home/testdev/demo/nginx/demo.conf
 grep -q "php${php_version}-fpm-testdev-demo.sock" /home/testdev/demo/php-fpm/demo.conf
 grep -q "listen.owner = nginx" /home/testdev/demo/php-fpm/demo.conf
@@ -792,6 +805,8 @@ grep -q "listen 443 ssl" /home/testdev/demo/nginx/demo.conf
 test -f /home/testdev/demo/nginx/ssl/demo.example.test.pem
 test -f /home/testdev/demo/nginx/ssl/demo.example.test.key
 grep -q "return 301 https" /home/testdev/demo/nginx/demo.conf
+grep -qF 'access_log /home/testdev/demo/log/access.log server_tool;' /home/testdev/demo/nginx/demo.conf
+grep -qF 'access_log /home/testdev/demo/log/access.log server_tool;' /home/testdev/demo/nginx/demo.conf
 
 grep -q 'https://demo.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json
 grep -q '"domain": "demo.example.test"' /var/lib/server-tool/monitoring/blackbox-targets.json

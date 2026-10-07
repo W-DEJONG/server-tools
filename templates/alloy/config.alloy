@@ -157,3 +157,70 @@ loki.source.file "laravel_logs" {
     sync_period = "10s"
   }
 }
+
+loki.process "access_requests" {
+  forward_to = []
+
+  stage.regex {
+    source     = "filename"
+    expression = `^/home/[^/]+/(?P<application>[^/]+)/`
+  }
+
+  stage.regex {
+    expression = `host=(?P<domain>[A-Za-z0-9._:-]+)\s*$`
+  }
+
+  stage.labels {
+    values = {
+      application = "",
+      domain      = "",
+    }
+  }
+
+  stage.match {
+    selector = `{domain=~".+"}`
+
+    stage.metrics {
+      metric.counter {
+        name        = "nginx_requests_total"
+        description = "Incoming requests recorded in nginx access logs"
+        prefix      = "loki_process_custom_"
+        action      = "inc"
+        match_all   = true
+        max_idle_duration = "24h"
+      }
+    }
+  }
+}
+
+loki.source.file "access_logs" {
+  targets = [
+    { __path__ = "/home/*/*/log/access.log" },
+  ]
+  forward_to = [loki.process.access_requests.receiver]
+
+  file_match {
+    enabled     = true
+    sync_period = "10s"
+  }
+}
+
+prometheus.relabel "access_requests" {
+  forward_to = [prometheus.remote_write.metrics.receiver]
+
+  rule {
+    source_labels = ["__name__"]
+    regex         = "loki_process_custom_nginx_requests_total"
+    action        = "keep"
+  }
+}
+
+prometheus.scrape "access_requests" {
+  targets = [{
+    "__address__" = "127.0.0.1:12345",
+  }]
+
+  forward_to      = [prometheus.relabel.access_requests.receiver]
+  scrape_interval = "30s"
+  job_name        = "nginx_requests"
+}

@@ -343,6 +343,46 @@ sync_app_letsencrypt_names() {
   ensure_certbot_autorenew
 }
 
+nginx_request_log_format_file() {
+  printf '%s\n' /etc/nginx/conf.d/00-server-tool-log-format.conf
+}
+
+ensure_nginx_request_log_format() {
+  mkdir -p /etc/nginx/conf.d
+  cat > "$(nginx_request_log_format_file)" <<'EOF'
+log_format server_tool '$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent" host=$host';
+EOF
+}
+
+apply_nginx_request_log_format() {
+  local conf changed=0 nullglob_was=0 mode owner
+
+  ensure_nginx_request_log_format
+  if ! command -v nginx >/dev/null 2>&1; then
+    return 0
+  fi
+
+  shopt -q nullglob && nullglob_was=1
+  shopt -s nullglob
+  for conf in /home/*/*/nginx/*.conf; do
+    if grep -qE 'access_log[[:space:]]+[^;[:space:]]+/log/access\.log[[:space:]]*;' "$conf"; then
+      mode="$(stat -c '%a' "$conf")"
+      owner="$(stat -c '%u:%g' "$conf")"
+      sed -i -E 's#(access_log[[:space:]]+[^;[:space:]]+/log/access\.log)[[:space:]]*;#\1 server_tool;#' "$conf"
+      chown "$owner" "$conf"
+      chmod "$mode" "$conf"
+      changed=1
+    fi
+  done
+  if [ "$nullglob_was" -eq 0 ]; then
+    shopt -u nullglob
+  fi
+
+  if [ "$changed" -eq 1 ]; then
+    reload_nginx
+  fi
+}
+
 render_nginx_app_conf() {
   local template="$1"
   local dest="$2"
@@ -354,6 +394,7 @@ render_nginx_app_conf() {
   local ssl_cert="${8:-}"
   local ssl_key="${9:-}"
 
+  ensure_nginx_request_log_format
   sed -e "s|{{USERNAME}}|$username|g" \
       -e "s|{{APP_NAME}}|$app_name|g" \
       -e "s|{{APP_ROOT}}|$app_root|g" \

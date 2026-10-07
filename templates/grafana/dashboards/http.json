@@ -1,7 +1,7 @@
 {
   "uid": "server-tools-http",
-  "title": "HTTP checks",
-  "description": "Blackbox HTTP and HTTPS probes for application domains.",
+  "title": "HTTP status",
+  "description": "Blackbox HTTP and HTTPS probes, and incoming request rates per server, application and domain.",
   "tags": ["server-tools"],
   "timezone": "utc",
   "schemaVersion": 39,
@@ -18,6 +18,32 @@
         "datasource": { "type": "prometheus", "uid": "prometheus" },
         "query": "label_values(probe_success, server)",
         "definition": "label_values(probe_success, server)",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false,
+        "sort": 1
+      },
+      {
+        "name": "application",
+        "label": "Application",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(loki_process_custom_nginx_requests_total{server=~\"$server\"}, application)",
+        "definition": "label_values(loki_process_custom_nginx_requests_total{server=~\"$server\"}, application)",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false,
+        "sort": 1
+      },
+      {
+        "name": "domain",
+        "label": "Domain",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(loki_process_custom_nginx_requests_total{server=~\"$server\",application=~\"$application\"}, domain)",
+        "definition": "label_values(loki_process_custom_nginx_requests_total{server=~\"$server\",application=~\"$application\"}, domain)",
         "refresh": 2,
         "includeAll": true,
         "allValue": ".*",
@@ -78,7 +104,7 @@
     {
       "id": 3,
       "type": "timeseries",
-      "title": "HTTP status",
+      "title": "Status code",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
       "targets": [
@@ -89,6 +115,87 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none", "decimals": 0 }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Requests per server",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 18 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (server) (rate(loki_process_custom_nginx_requests_total{server=~\"$server\",application=~\"$application\",domain=~\"$domain\",application!=\"\",domain!=\"\"}[5m]))",
+          "legendFormat": "{{server}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "links": [
+            {
+              "title": "Applications",
+              "url": "/d/server-tools-http?${__url_time_range}&var-server=${__field.labels.server}&var-application=All&var-domain=All",
+              "targetBlank": false
+            }
+          ]
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Requests per application",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 18 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (server, application) (rate(loki_process_custom_nginx_requests_total{server=~\"$server\",application=~\"$application\",domain=~\"$domain\",application!=\"\",domain!=\"\"}[5m]))",
+          "legendFormat": "{{application}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "links": [
+            {
+              "title": "Domains",
+              "url": "/d/server-tools-http?${__url_time_range}&var-server=${__field.labels.server}&var-application=${__field.labels.application}&var-domain=All",
+              "targetBlank": false
+            }
+          ]
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Requests per domain",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 18 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (server, application, domain) (rate(loki_process_custom_nginx_requests_total{server=~\"$server\",application=~\"$application\",domain=~\"$domain\",application!=\"\",domain!=\"\"}[5m]))",
+          "legendFormat": "{{domain}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "links": [
+            {
+              "title": "This domain",
+              "url": "/d/server-tools-http?${__url_time_range}&var-server=${__field.labels.server}&var-application=${__field.labels.application}&var-domain=${__field.labels.domain}",
+              "targetBlank": false
+            }
+          ]
+        },
+        "overrides": []
+      }
     }
   ]
 }

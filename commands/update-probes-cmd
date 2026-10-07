@@ -29,14 +29,16 @@ if [ -z "$url" ] || [ -z "$api_key" ]; then
   exit 1
 fi
 
-confirm_or_exit "This will update Alloy, application log access and HTTP probes. Continue? (y/n): "
+confirm_or_exit "This will update Alloy, application log access, HTTP probes and nginx access logs. Continue? (y/n): "
 
+apply_nginx_request_log_format
 install_alloy_config "$url" "$api_key" "$server_name"
 sync_all_app_monitoring
 systemctl restart alloy
 
 echo
-echo "Grafana Alloy, application log access and HTTP probes updated."
+echo "Grafana Alloy, application log access, HTTP probes and nginx access logs updated."
 echo "  Config: $config"
 echo "  File: $(monitoring_blackbox_targets_file)"
+echo "  Nginx: $(nginx_request_log_format_file)"
 echo "Alloy picks up log files and probe targets within 30 seconds."

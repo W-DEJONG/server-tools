@@ -12,6 +12,7 @@ apt install -y nginx certbot python3-certbot-nginx ufw
 systemctl enable nginx
 systemctl start nginx
 
+ensure_nginx_request_log_format
 cat > /etc/nginx/conf.d/10-server-tool-large-files.conf <<'EOF'
 # Allow applications to stream files up to 100 GB through PHP-FPM.
 # The extra 1 GB allows for multipart/form-data overhead.

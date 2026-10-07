@@ -76,7 +76,7 @@ command_summary() {
     switch-php) echo "Switch an application to another PHP version" ;;
     test-backup) echo "Upload a small test object to verify S3 backup config" ;;
     update-grafana) echo "Replace the shipped Grafana dashboards with the current templates" ;;
-    update-probes) echo "Update Alloy config, application log access, and HTTP probes" ;;
+    update-probes) echo "Update Alloy config, application log access, nginx request logs, and HTTP probes" ;;
     *) echo "No summary available" ;;
   esac
 }
@@ -1171,6 +1171,8 @@ Alloy's read access to application logs. The existing monitoring URL and
 API key are retained, and Alloy is restarted after validation.
 Each dotted nginx server_name becomes a probe labeled with that domain.
 Nginx and Laravel logs are read from log/ and current/storage/logs.
+Application access logs are switched to the server_tool format, which
+records the requested host, and nginx is reloaded.
 Run this on an application server after server-tool self-update.
 
 Usage:
@@ -1497,9 +1499,11 @@ in the X-Api-Key header. The key is stored only in /etc/alloy/config.alloy.
 Laravel logs are read through current/storage/logs, so a Deployer release
 switch keeps the same file. A Laravel entry and its stack trace stay one
 event, labeled with its level (ERROR, INFO, WARNING). Nginx error lines
-get the same level labels. Existing applications are picked up during
-install. Later create-app, domain, SSL, rename and delete commands update
-the HTTP checks.
+get the same level labels. Nginx access lines are counted as incoming
+requests, with the domain taken from host= at the end of each line.
+Existing applications are picked up during install. Later create-app,
+domain, SSL, rename and delete commands update the HTTP checks.
+update-probes also rewrites the Alloy config.
 
 Usage:
   server-tool install alloy --url <https://host> --api-key-file <file> [-y]
