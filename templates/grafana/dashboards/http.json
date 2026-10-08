@@ -196,6 +196,117 @@
         },
         "overrides": []
       }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Requests in period per server",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 26 },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sum by (server) (increase(loki_process_custom_nginx_requests_total{server=~\"$server\",application=~\"$application\",domain=~\"$domain\",application!=\"\",domain!=\"\"}[$__range]))",
+          "legendFormat": "{{server}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "links": [
+            {
+              "title": "Applications",
+              "url": "/d/server-tools-http?${__url_time_range}&var-server=${__field.labels.server}&var-application=All&var-domain=All",
+              "targetBlank": false
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Requests in period per application",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 26 },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sum by (server, application) (increase(loki_process_custom_nginx_requests_total{server=~\"$server\",application=~\"$application\",domain=~\"$domain\",application!=\"\",domain!=\"\"}[$__range]))",
+          "legendFormat": "{{application}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "links": [
+            {
+              "title": "Domains",
+              "url": "/d/server-tools-http?${__url_time_range}&var-server=${__field.labels.server}&var-application=${__field.labels.application}&var-domain=All",
+              "targetBlank": false
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Requests in period per domain",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 26 },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sum by (server, application, domain) (increase(loki_process_custom_nginx_requests_total{server=~\"$server\",application=~\"$application\",domain=~\"$domain\",application!=\"\",domain!=\"\"}[$__range]))",
+          "legendFormat": "{{domain}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "links": [
+            {
+              "title": "This domain",
+              "url": "/d/server-tools-http?${__url_time_range}&var-server=${__field.labels.server}&var-application=${__field.labels.application}&var-domain=${__field.labels.domain}",
+              "targetBlank": false
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
     }
   ]
 }

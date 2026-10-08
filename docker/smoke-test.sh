@@ -361,6 +361,8 @@ grep -q '"legendFormat": "{{domain}}"' /var/lib/grafana/dashboards/server-tools/
 grep -q '"title": "HTTP status"' /var/lib/grafana/dashboards/server-tools/http.json
 grep -q 'Requests per domain' /var/lib/grafana/dashboards/server-tools/http.json
 grep -q 'loki_process_custom_nginx_requests_total' /var/lib/grafana/dashboards/server-tools/http.json
+grep -q 'increase(' /var/lib/grafana/dashboards/server-tools/http.json
+grep -qF '$__range' /var/lib/grafana/dashboards/server-tools/http.json
 grep -q 'label_values(username)' /var/lib/grafana/dashboards/server-tools/logs.json
 grep -q 'label_values(logfile)' /var/lib/grafana/dashboards/server-tools/logs.json
 grep -q 'label_values(level)' /var/lib/grafana/dashboards/server-tools/logs.json
