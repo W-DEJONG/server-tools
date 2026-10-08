@@ -1,9 +1,23 @@
 #!/bin/bash
 set -eo pipefail
 
-if [ $# -ne 0 ]; then
-    echo "Usage: server-tool list-apps"
-    exit 1
-fi
+verbose=0
+usage="Usage: server-tool list-apps [-v]"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -v|--verbose)
+      verbose=1
+      shift
+      ;;
+    *)
+      echo "$usage"
+      exit 1
+      ;;
+  esac
+done
 
-list_server_tool_apps
+if [ "$verbose" -eq 1 ]; then
+  list_server_tool_apps_verbose
+else
+  list_server_tool_apps
+fi

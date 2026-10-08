@@ -79,6 +79,8 @@ server-tool create-app testdev demo -d mijnapp -t mysql --host db.internal --adm
 server-tool create-app testdev demo -d mijnapp -t pgsql --host db.internal --admin-user postgres -y
 server-tool create-app testdev demo --nginx legacy -y
 server-tool list-apps
+server-tool list-apps -v
+server-tool status
 server-tool delete-app <username> <application> [-y]
 server-tool rename-app <username> <application> <new_name> [--keep-domain] [-y]
 server-tool switch-php <username> <application> [-p <php-version>] [-y]

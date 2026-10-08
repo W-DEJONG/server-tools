@@ -71,6 +71,7 @@ command_summary() {
     show-ssh-key) echo "Print an application user's private SSH key as base64" ;;
     start-horizon) echo "Start an application's Laravel Horizon Supervisor program" ;;
     start-queue) echo "Start an application's Laravel queue Supervisor program" ;;
+    status) echo "Show SSH password login and a verbose application overview" ;;
     stop-horizon) echo "Stop an application's Laravel Horizon Supervisor program" ;;
     stop-queue) echo "Stop an application's Laravel queue Supervisor program" ;;
     switch-nginx) echo "Switch an application's nginx PHP mode between strict and legacy" ;;
@@ -764,12 +765,22 @@ list-apps
 List installed applications as "username application".
 
 An application is detected by /home/<user>/<app>/nginx/<app>.conf.
+With -v, each application is one row: nginx PHP mode (strict or legacy),
+basic auth, SSL (off, self-signed, or letsencrypt), daily backup cron,
+Laravel scheduler, and Supervisor programs that are RUNNING. Horizon is
+shown as horizon. Queue workers are shown by their --queue names, or
+default when --queue is omitted. workers is unknown when supervisorctl
+cannot be queried.
 
 Usage:
-  server-tool list-apps
+  server-tool list-apps [-v]
+
+Options:
+  -v, --verbose  Add nginx, auth, ssl, backup, scheduler, and workers columns
 
 Examples:
   server-tool list-apps
+  server-tool list-apps -v
 EOF
       ;;
     list-domains)
@@ -1053,6 +1064,23 @@ Options:
 Examples:
   server-tool start-queue testdev demo -y
   server-tool start-queue testdev demo --restart -y
+EOF
+      ;;
+    status)
+      cat <<'EOF'
+status
+
+Show whether SSH password login is enabled, then the verbose application list.
+
+Password login is disabled only when sshd's effective configuration has
+both passwordauthentication and kbdinteractiveauthentication set to no.
+The application table is the same as list-apps -v.
+
+Usage:
+  server-tool status
+
+Examples:
+  server-tool status
 EOF
       ;;
     stop-horizon)

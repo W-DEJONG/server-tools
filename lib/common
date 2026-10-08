@@ -2320,6 +2320,197 @@ list_server_tool_apps() {
   printf '%s\n' "${apps[@]}" | sort
 }
 
+app_auth_column() {
+  local auth_inc="$1"
+  if [ -f "$auth_inc" ] && grep -q 'auth_basic' "$auth_inc"; then
+    printf '%s\n' on
+  else
+    printf '%s\n' off
+  fi
+}
+
+app_ssl_column() {
+  local conf="$1"
+  if ! grep -q 'listen 443' "$conf"; then
+    printf '%s\n' off
+    return 0
+  fi
+  if app_letsencrypt_lineage "$conf" >/dev/null; then
+    printf '%s\n' letsencrypt
+  else
+    printf '%s\n' self-signed
+  fi
+}
+
+app_backup_column() {
+  local username="$1"
+  local app_name="$2"
+  local cron_file legacy
+  cron_file="$(app_backup_cron_file "$username" "$app_name")"
+  legacy="/etc/cron.d/server-tool-backup-${username}-${app_name}"
+  if [ -f "$cron_file" ] || { [ "$legacy" != "$cron_file" ] && [ -f "$legacy" ]; }; then
+    printf '%s\n' on
+  else
+    printf '%s\n' off
+  fi
+}
+
+app_scheduler_column() {
+  local app_root="$1"
+  if [ -f "${app_root}/cron/scheduler" ]; then
+    printf '%s\n' on
+  else
+    printf '%s\n' off
+  fi
+}
+
+load_app_supervisor_status() {
+  APP_VERBOSE_SUPERVISOR_KNOWN=0
+  APP_VERBOSE_SUPERVISOR_STATUS=""
+  if ! command -v supervisorctl >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! systemctl is-active --quiet supervisor && ! systemctl is-active --quiet supervisord; then
+    return 0
+  fi
+  APP_VERBOSE_SUPERVISOR_STATUS="$(supervisorctl status 2>/dev/null || true)"
+  APP_VERBOSE_SUPERVISOR_KNOWN=1
+}
+
+supervisor_program_is_running() {
+  local program="$1"
+  local line name state
+  if [ "${APP_VERBOSE_SUPERVISOR_KNOWN:-0}" != "1" ]; then
+    return 1
+  fi
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    name="$(printf '%s\n' "$line" | awk '{print $1}')"
+    state="$(printf '%s\n' "$line" | awk '{print $2}')"
+    [ "$state" = "RUNNING" ] || continue
+    if [ "$name" = "$program" ] || [[ "$name" == "$program:"* ]]; then
+      return 0
+    fi
+  done <<< "${APP_VERBOSE_SUPERVISOR_STATUS}"
+  return 1
+}
+
+app_queue_names_from_conf() {
+  local conf="$1"
+  local cmd
+  cmd="$(sed -n 's/^[[:space:]]*command[[:space:]]*=[[:space:]]*//p' "$conf" | head -1)"
+  if [[ "$cmd" =~ --queue=([^[:space:]]+) ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+  else
+    printf '%s\n' default
+  fi
+}
+
+app_workers_column() {
+  local username="$1"
+  local app_name="$2"
+  local app_root="$3"
+  local conf queues
+  local parts=()
+  if [ "${APP_VERBOSE_SUPERVISOR_KNOWN:-0}" != "1" ]; then
+    printf '%s\n' unknown
+    return 0
+  fi
+  if supervisor_program_is_running "horizon-${username}-${app_name}"; then
+    parts+=(horizon)
+  fi
+  if supervisor_program_is_running "queue-${username}-${app_name}"; then
+    conf="${app_root}/supervisor/queue.conf"
+    if [ -f "$conf" ]; then
+      queues="$(app_queue_names_from_conf "$conf")"
+    else
+      queues="default"
+    fi
+    parts+=("$queues")
+  fi
+  if [ ${#parts[@]} -eq 0 ]; then
+    printf '%s\n' off
+    return 0
+  fi
+  local IFS=','
+  printf '%s\n' "${parts[*]}"
+}
+
+print_tsv_columns() {
+  local -a lines=("$@")
+  local line i
+  local -a width=(0 0 0 0 0 0 0 0)
+  local -a fields
+  local col_count=8
+
+  for line in "${lines[@]}"; do
+    IFS=$'\t' read -r -a fields <<< "$line"
+    for ((i = 0; i < col_count; i++)); do
+      if [ "${#fields[i]}" -gt "${width[i]}" ]; then
+        width[i]="${#fields[i]}"
+      fi
+    done
+  done
+
+  for line in "${lines[@]}"; do
+    IFS=$'\t' read -r -a fields <<< "$line"
+    printf '%-*s  %-*s  %-*s  %-*s  %-*s  %-*s  %-*s  %-*s\n' \
+      "${width[0]}" "${fields[0]}" \
+      "${width[1]}" "${fields[1]}" \
+      "${width[2]}" "${fields[2]}" \
+      "${width[3]}" "${fields[3]}" \
+      "${width[4]}" "${fields[4]}" \
+      "${width[5]}" "${fields[5]}" \
+      "${width[6]}" "${fields[6]}" \
+      "${width[7]}" "${fields[7]}"
+  done
+}
+
+list_server_tool_apps_verbose() {
+  local line username app_name app_root conf
+  local -a rows=()
+
+  load_app_supervisor_status
+  rows+=($'USER\tAPP\tNGINX\tAUTH\tSSL\tBACKUP\tSCHEDULER\tWORKERS')
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    username="${line%% *}"
+    app_name="${line#* }"
+    app_root="/home/${username}/${app_name}"
+    conf="${app_root}/nginx/${app_name}.conf"
+    rows+=("$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
+      "$username" \
+      "$app_name" \
+      "$(nginx_php_mode_from_conf "$conf")" \
+      "$(app_auth_column "${app_root}/nginx/auth.inc")" \
+      "$(app_ssl_column "$conf")" \
+      "$(app_backup_column "$username" "$app_name")" \
+      "$(app_scheduler_column "$app_root")" \
+      "$(app_workers_column "$username" "$app_name" "$app_root")")")
+  done < <(list_server_tool_apps || true)
+  print_tsv_columns "${rows[@]}"
+}
+
+ssh_password_login_state() {
+  local dump password kbd
+  if ! command -v sshd >/dev/null 2>&1; then
+    printf '%s\n' unknown
+    return 0
+  fi
+  dump="$(sshd -T 2>/dev/null || true)"
+  if [ -z "$dump" ]; then
+    printf '%s\n' unknown
+    return 0
+  fi
+  password="$(printf '%s\n' "$dump" | awk '$1=="passwordauthentication" {print $2; exit}')"
+  kbd="$(printf '%s\n' "$dump" | awk '$1=="kbdinteractiveauthentication" {print $2; exit}')"
+  if [ "$password" = "no" ] && [ "$kbd" = "no" ]; then
+    printf '%s\n' disabled
+  else
+    printf '%s\n' enabled
+  fi
+}
+
 monitoring_json_escape() {
   local value="$1"
   value="${value//\\/\\\\}"

@@ -27,6 +27,18 @@ node_version="$(tail -1 "$repo_dir/templates/node-versions")"
 other_node_version="$(tail -2 "$repo_dir/templates/node-versions" | head -1)"
 postgres_version="$(tail -1 "$repo_dir/templates/postgresql-versions")"
 
+verbose_app_field() {
+  local user="$1"
+  local app="$2"
+  local field="$3"
+  server-tool list-apps -v | awk -v u="$user" -v a="$app" -v f="$field" '
+    NR == 1 {
+      for (i = 1; i <= NF; i++) if ($i == f) col = i
+    }
+    $1 == u && $2 == a { print $col }
+  '
+}
+
 if [ "${EUID}" -ne 0 ]; then
     echo "Run this smoke test as root inside the test container."
     exit 1
@@ -56,6 +68,7 @@ server-tool help | grep -q list-queues
 server-tool help | grep -q list-jobs
 server-tool help | grep -q list-github-runners
 server-tool help | grep -q switch-nginx
+server-tool help | grep -q status
 
 echo "==> help lists app-structure topic"
 server-tool help | grep -q app-structure
@@ -63,6 +76,8 @@ server-tool help | grep -q app-structure
 echo "==> help create-app prints usage"
 server-tool help create-app | grep -q 'Usage:'
 server-tool help switch-nginx | grep -q 'Usage:'
+server-tool help list-apps | grep -q -- '-v'
+server-tool help status | grep -q 'Usage:'
 
 echo "==> help start-queue documents --restart"
 server-tool help start-queue | grep -q -- '--restart'
@@ -659,6 +674,15 @@ grep -q '^DB_DATABASE=dump_testdb' /home/testdev/demo/.env.db
 
 echo "==> list-apps"
 server-tool list-apps | grep -qxF 'testdev demo'
+server-tool list-apps -v | awk 'NR==1 {print $1,$2,$3,$4,$5,$6,$7,$8}' | grep -qxF 'USER APP NGINX AUTH SSL BACKUP SCHEDULER WORKERS'
+test "$(verbose_app_field testdev demo NGINX)" = strict
+test "$(verbose_app_field testdev demo AUTH)" = off
+test "$(verbose_app_field testdev demo SSL)" = off
+test "$(verbose_app_field testdev demo BACKUP)" = off
+test "$(verbose_app_field testdev demo SCHEDULER)" = off
+test "$(verbose_app_field testdev demo WORKERS)" = off
+[[ "$(server-tool status | awk 'NR==1')" == "SSH password login: disabled" ]]
+[[ "$(server-tool status | awk '$1=="testdev" && $2=="demo" {print $3}')" == "strict" ]]
 getfacl /home/testdev/demo/log | grep -q 'user:alloy:r-x'
 if grep -q 'demo.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json; then
     echo "Expected no HTTP probe before a dotted domain exists"
@@ -684,6 +708,12 @@ server-tool create-app testdev mysqlapp -d smoke_mysqlapp -t mysql -p "$php_vers
 test -f /home/testdev/mysqlapp/.env.db
 grep -qxF '# nginx-php-mode: legacy' /home/testdev/mysqlapp/nginx/mysqlapp.conf
 grep -q 'fastcgi_split_path_info' /home/testdev/mysqlapp/nginx/mysqlapp.conf
+test "$(verbose_app_field testdev mysqlapp NGINX)" = legacy
+test "$(verbose_app_field testdev mysqlapp AUTH)" = off
+test "$(verbose_app_field testdev mysqlapp SSL)" = off
+test "$(verbose_app_field testdev mysqlapp BACKUP)" = off
+test "$(verbose_app_field testdev mysqlapp SCHEDULER)" = off
+test "$(verbose_app_field testdev mysqlapp WORKERS)" = off
 grep -q '^DB_CONNECTION=mysql' /home/testdev/mysqlapp/.env.db
 grep -q '^DB_HOST=127.0.0.1' /home/testdev/mysqlapp/.env.db
 grep -q '^DB_PORT=3306' /home/testdev/mysqlapp/.env.db
@@ -757,6 +787,24 @@ grep -q '^autorestart=true' /home/testdev/demo/supervisor/queue.conf
 
 echo "==> start-queue testdev demo --restart"
 server-tool start-queue testdev demo --restart -y
+expected_workers=off
+supervisor_status="$(supervisorctl status 2>/dev/null || true)"
+horizon_running=0
+queue_running=0
+if printf '%s\n' "$supervisor_status" | awk '$2=="RUNNING" && ($1=="horizon-testdev-demo" || index($1,"horizon-testdev-demo:")==1) {found=1} END {exit !found}'; then
+    horizon_running=1
+fi
+if printf '%s\n' "$supervisor_status" | awk '$2=="RUNNING" && ($1=="queue-testdev-demo" || index($1,"queue-testdev-demo:")==1) {found=1} END {exit !found}'; then
+    queue_running=1
+fi
+if [ "$horizon_running" -eq 1 ] && [ "$queue_running" -eq 1 ]; then
+    expected_workers=horizon,default
+elif [ "$horizon_running" -eq 1 ]; then
+    expected_workers=horizon
+elif [ "$queue_running" -eq 1 ]; then
+    expected_workers=default
+fi
+test "$(verbose_app_field testdev demo WORKERS)" = "$expected_workers"
 
 echo "==> stop-horizon testdev demo --disable"
 server-tool stop-horizon testdev demo --disable -y
@@ -794,6 +842,7 @@ server-tool enable-basic-auth testdev demo tester -r Staging -y
 grep -q 'auth_basic "Staging"' /home/testdev/demo/nginx/auth.inc
 test ! -e /home/testdev/demo/nginx/auth-map.conf
 test -s /home/testdev/demo/nginx/.htpasswd
+test "$(verbose_app_field testdev demo AUTH)" = on
 
 echo "==> enable-basic-auth testdev demo tester --except"
 server-tool enable-basic-auth testdev demo tester -r Staging --except /webhooks --except /up -y
@@ -820,6 +869,7 @@ grep -q "return 301 https" /home/testdev/demo/nginx/demo.conf
 grep -qF 'access_log /home/testdev/demo/log/access.log server_tool;' /home/testdev/demo/nginx/demo.conf
 grep -qxF '# nginx-php-mode: strict' /home/testdev/demo/nginx/demo.conf
 grep -qF 'location ~ ^/index\.php(/|$) {' /home/testdev/demo/nginx/demo.conf
+test "$(verbose_app_field testdev demo SSL)" = self-signed
 
 grep -q 'https://demo.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json
 grep -q '"domain": "demo.example.test"' /var/lib/server-tool/monitoring/blackbox-targets.json
@@ -875,6 +925,7 @@ grep -q "php${php_version} artisan schedule:run" /home/testdev/demo/cron/schedul
 crontab -u testdev -l | grep -qF '# BEGIN server-tool app: testdev/demo'
 crontab -u testdev -l | grep -qF "cd /home/testdev/demo/current && php${php_version} artisan schedule:run"
 crontab -u testdev -l | grep -qF '# END server-tool app: testdev/demo'
+test "$(verbose_app_field testdev demo SCHEDULER)" = on
 
 echo "==> apply-cron testdev demo"
 cat > /home/testdev/demo/cron/extra <<EOF
@@ -1027,15 +1078,37 @@ echo "==> cron.d backup filenames are sanitized"
 [[ "$(app_backup_cron_file test_dev my.app)" == "/etc/cron.d/server-tool-backup-test-dev-my-app" ]]
 [[ "$(app_backup_cron_file 'test__dev' '.my.app.')" == "/etc/cron.d/server-tool-backup-test-dev-my-app" ]]
 
+echo "==> verbose workers column follows supervisor status"
+workers_root="$(mktemp -d)"
+mkdir -p "$workers_root/supervisor"
+APP_VERBOSE_SUPERVISOR_KNOWN=1
+APP_VERBOSE_SUPERVISOR_STATUS=$'horizon-testdev-demo:horizon-testdev-demo_00 RUNNING pid 1, uptime 0:01:00\nqueue-testdev-demo:queue-testdev-demo_00 RUNNING pid 2, uptime 0:01:00'
+printf '%s\n' 'command=php8.4 artisan queue:work --queue=emails,reports --sleep=3' > "$workers_root/supervisor/queue.conf"
+[[ "$(app_workers_column testdev demo "$workers_root")" == "horizon,emails,reports" ]]
+printf '%s\n' 'command=php8.4 artisan queue:work --sleep=3' > "$workers_root/supervisor/queue.conf"
+[[ "$(app_workers_column testdev demo "$workers_root")" == "horizon,default" ]]
+APP_VERBOSE_SUPERVISOR_STATUS=$'queue-testdev-demo:queue-testdev-demo_00 RUNNING pid 2, uptime 0:01:00'
+[[ "$(app_workers_column testdev demo "$workers_root")" == "default" ]]
+APP_VERBOSE_SUPERVISOR_STATUS=$'horizon-testdev-demo2:horizon-testdev-demo2_00 RUNNING pid 3, uptime 0:01:00'
+[[ "$(app_workers_column testdev demo "$workers_root")" == "off" ]]
+[[ "$(app_workers_column testdev demo2 "$workers_root")" == "horizon" ]]
+APP_VERBOSE_SUPERVISOR_STATUS=$'horizon-testdev-demo:horizon-testdev-demo_00 FATAL Exited too quickly'
+[[ "$(app_workers_column testdev demo "$workers_root")" == "off" ]]
+APP_VERBOSE_SUPERVISOR_KNOWN=0
+[[ "$(app_workers_column testdev demo "$workers_root")" == "unknown" ]]
+rm -rf "$workers_root"
+
 echo "==> backup-app testdev demo --enable"
 server-tool backup-app testdev demo --enable -y
 test -f /etc/cron.d/server-tool-backup-testdev-demo
 grep -q 'PATH=' /etc/cron.d/server-tool-backup-testdev-demo
 grep -qF 'backup-app testdev demo -y' /etc/cron.d/server-tool-backup-testdev-demo
+test "$(verbose_app_field testdev demo BACKUP)" = on
 
 echo "==> backup-app testdev demo --disable"
 server-tool backup-app testdev demo --disable -y
 test ! -f /etc/cron.d/server-tool-backup-testdev-demo
+test "$(verbose_app_field testdev demo BACKUP)" = off
 
 echo "==> install aws smoke-bucket (stub CLI)"
 cat > /usr/local/bin/aws <<'EOF'

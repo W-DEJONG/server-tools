@@ -1,0 +1,12 @@
+#!/bin/bash
+set -eo pipefail
+
+usage="Usage: server-tool status"
+if [ $# -ne 0 ]; then
+  echo "$usage"
+  exit 1
+fi
+
+echo "SSH password login: $(ssh_password_login_state)"
+echo
+list_server_tool_apps_verbose
