@@ -69,6 +69,7 @@ ssl_enabled=0
 if grep -q 'listen 443' "$old_nginx_conf"; then
   ssl_enabled=1
 fi
+nginx_php_mode="$(nginx_php_mode_from_conf "$old_nginx_conf")"
 
 server_name=""
 name_is_present() {
@@ -178,7 +179,7 @@ ssl_cert="$new_root/nginx/ssl/${ssl_domain}.pem"
 ssl_key="$new_root/nginx/ssl/${ssl_domain}.key"
 if [ "$ssl_enabled" -eq 1 ]; then
   render_nginx_app_conf \
-    "$SERVER_TOOL_ROOT/templates/nginx-laravel-ssl.conf" \
+    "$(nginx_laravel_template "$nginx_php_mode" 1)" \
     "$new_root/nginx/${new_app}.conf" \
     "$username" \
     "$new_app" \
@@ -189,7 +190,7 @@ if [ "$ssl_enabled" -eq 1 ]; then
     "$ssl_key"
 else
   render_nginx_app_conf \
-    "$SERVER_TOOL_ROOT/templates/nginx-laravel.conf" \
+    "$(nginx_laravel_template "$nginx_php_mode" 0)" \
     "$new_root/nginx/${new_app}.conf" \
     "$username" \
     "$new_app" \

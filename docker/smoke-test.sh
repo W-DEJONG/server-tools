@@ -55,12 +55,14 @@ server-tool help | grep -q list-horizons
 server-tool help | grep -q list-queues
 server-tool help | grep -q list-jobs
 server-tool help | grep -q list-github-runners
+server-tool help | grep -q switch-nginx
 
 echo "==> help lists app-structure topic"
 server-tool help | grep -q app-structure
 
 echo "==> help create-app prints usage"
 server-tool help create-app | grep -q 'Usage:'
+server-tool help switch-nginx | grep -q 'Usage:'
 
 echo "==> help start-queue documents --restart"
 server-tool help start-queue | grep -q -- '--restart'
@@ -636,6 +638,12 @@ test -f /home/testdev/demo/nginx/demo.conf
 grep -q "current/public" /home/testdev/demo/nginx/demo.conf
 grep -qF 'access_log /home/testdev/demo/log/access.log server_tool;' /home/testdev/demo/nginx/demo.conf
 grep -q "php${php_version}-fpm-testdev-demo.sock" /home/testdev/demo/nginx/demo.conf
+grep -qxF '# nginx-php-mode: strict' /home/testdev/demo/nginx/demo.conf
+grep -qF 'location ~ ^/index\.php(/|$) {' /home/testdev/demo/nginx/demo.conf
+if grep -q 'fastcgi_split_path_info' /home/testdev/demo/nginx/demo.conf; then
+    echo "Expected the default nginx config to omit fastcgi_split_path_info"
+    exit 1
+fi
 grep -q "php${php_version}-fpm-testdev-demo.sock" /home/testdev/demo/php-fpm/demo.conf
 grep -q "listen.owner = nginx" /home/testdev/demo/php-fpm/demo.conf
 grep -q "listen.group = nginx" /home/testdev/demo/php-fpm/demo.conf
@@ -672,8 +680,10 @@ server-tool create-db smoke_mysqldb -t mysql -y
 mysql -N -B -e "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'smoke_mysqldb'" | grep -qx 1
 
 echo "==> create-app testdev mysqlapp -d smoke_mysqlapp -t mysql"
-server-tool create-app testdev mysqlapp -d smoke_mysqlapp -t mysql -p "$php_version" -y
+server-tool create-app testdev mysqlapp -d smoke_mysqlapp -t mysql -p "$php_version" --nginx legacy -y
 test -f /home/testdev/mysqlapp/.env.db
+grep -qxF '# nginx-php-mode: legacy' /home/testdev/mysqlapp/nginx/mysqlapp.conf
+grep -q 'fastcgi_split_path_info' /home/testdev/mysqlapp/nginx/mysqlapp.conf
 grep -q '^DB_CONNECTION=mysql' /home/testdev/mysqlapp/.env.db
 grep -q '^DB_HOST=127.0.0.1' /home/testdev/mysqlapp/.env.db
 grep -q '^DB_PORT=3306' /home/testdev/mysqlapp/.env.db
@@ -808,7 +818,8 @@ test -f /home/testdev/demo/nginx/ssl/demo.example.test.pem
 test -f /home/testdev/demo/nginx/ssl/demo.example.test.key
 grep -q "return 301 https" /home/testdev/demo/nginx/demo.conf
 grep -qF 'access_log /home/testdev/demo/log/access.log server_tool;' /home/testdev/demo/nginx/demo.conf
-grep -qF 'access_log /home/testdev/demo/log/access.log server_tool;' /home/testdev/demo/nginx/demo.conf
+grep -qxF '# nginx-php-mode: strict' /home/testdev/demo/nginx/demo.conf
+grep -qF 'location ~ ^/index\.php(/|$) {' /home/testdev/demo/nginx/demo.conf
 
 grep -q 'https://demo.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json
 grep -q '"domain": "demo.example.test"' /var/lib/server-tool/monitoring/blackbox-targets.json
@@ -916,6 +927,39 @@ grep -q '/home/testdev/demo2/nginx/.htpasswd' /home/testdev/demo2/nginx/auth.inc
 grep -q 'default "Staging"' /home/testdev/demo2/nginx/auth-map.conf
 grep -qF '~^/webhooks(/|\?|$)' /home/testdev/demo2/nginx/auth-map.conf
 grep -qF '~^/up(/|\?|$)' /home/testdev/demo2/nginx/auth-map.conf
+grep -qxF '# nginx-php-mode: strict' /home/testdev/demo2/nginx/demo2.conf
+
+echo "==> switch-nginx testdev demo2"
+if server-tool switch-nginx testdev demo2 -m strict -y; then
+    echo "Expected switch-nginx to the current mode to fail"
+    exit 1
+fi
+if server-tool switch-nginx testdev demo2 -y; then
+    echo "Expected switch-nginx -y without -m to fail"
+    exit 1
+fi
+server-tool switch-nginx testdev demo2 -m legacy -y
+grep -qxF '# nginx-php-mode: legacy' /home/testdev/demo2/nginx/demo2.conf
+grep -q 'fastcgi_split_path_info' /home/testdev/demo2/nginx/demo2.conf
+grep -qE 'server_name[[:space:]]+.*demo\.example\.test' /home/testdev/demo2/nginx/demo2.conf
+grep -qE 'server_name[[:space:]]+.*demo2' /home/testdev/demo2/nginx/demo2.conf
+grep -q "listen 443 ssl" /home/testdev/demo2/nginx/demo2.conf
+grep -q "php${php_version}-fpm-testdev-demo2.sock" /home/testdev/demo2/nginx/demo2.conf
+test -f /home/testdev/demo2/nginx/ssl/demo.example.test.pem
+test -f /home/testdev/demo2/nginx/ssl/demo.example.test.key
+server-tool switch-nginx testdev demo2 -m strict -y
+grep -qxF '# nginx-php-mode: strict' /home/testdev/demo2/nginx/demo2.conf
+grep -qF 'location ~ ^/index\.php(/|$) {' /home/testdev/demo2/nginx/demo2.conf
+if grep -q 'fastcgi_split_path_info' /home/testdev/demo2/nginx/demo2.conf; then
+    echo "Expected strict nginx config to omit fastcgi_split_path_info"
+    exit 1
+fi
+grep -qE 'server_name[[:space:]]+.*demo\.example\.test' /home/testdev/demo2/nginx/demo2.conf
+grep -qE 'server_name[[:space:]]+.*demo2' /home/testdev/demo2/nginx/demo2.conf
+grep -q "listen 443 ssl" /home/testdev/demo2/nginx/demo2.conf
+grep -q "php${php_version}-fpm-testdev-demo2.sock" /home/testdev/demo2/nginx/demo2.conf
+test -f /home/testdev/demo2/nginx/ssl/demo.example.test.pem
+test -f /home/testdev/demo2/nginx/ssl/demo.example.test.key
 
 echo "==> switch-php testdev demo2 ${other_php_version}"
 if server-tool switch-php testdev demo2 -p "$php_version" -y; then

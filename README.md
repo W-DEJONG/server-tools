@@ -72,15 +72,19 @@ server-tool create-user <username> [-p <php-version>] [-y]
 server-tool create-sudo-user <username> [-k <ssh-public-key-or-file>] [--no-password] [-y]
 server-tool show-ssh-key <username>
 server-tool delete-user <username> [-y]
-server-tool create-app <username> <application> [-u] [-d <db_name>] [-t pgsql|mysql] [--host <host>] [--port <port>] [--admin-user <user>] [--admin-password <password>] [--user-host <mysql-user-host>] [-p <php-version>] [-y]
+server-tool create-app <username> <application> [-u] [-d <db_name>] [-t pgsql|mysql] [--host <host>] [--port <port>] [--admin-user <user>] [--admin-password <password>] [--user-host <mysql-user-host>] [-p <php-version>] [--nginx strict|legacy] [-y]
 server-tool create-app testdev demo -u -d mijnapp -p 8.4 -y
 server-tool create-app testdev demo -u -d mijnapp -t mysql -y
 server-tool create-app testdev demo -d mijnapp -t mysql --host db.internal --admin-user root -y
 server-tool create-app testdev demo -d mijnapp -t pgsql --host db.internal --admin-user postgres -y
+server-tool create-app testdev demo --nginx legacy -y
 server-tool list-apps
 server-tool delete-app <username> <application> [-y]
 server-tool rename-app <username> <application> <new_name> [--keep-domain] [-y]
 server-tool switch-php <username> <application> [-p <php-version>] [-y]
+server-tool switch-nginx <username> <application> [-m strict|legacy] [-y]
+server-tool switch-nginx testdev demo -m strict -y
+server-tool switch-nginx testdev demo -m legacy -y
 server-tool enable-ssl <username> <application> [-d <domain>] [-e <email>] [--self-signed] [--renew] [-y]
 server-tool add-domain <username> <application> <domain> [-y]
 server-tool list-domains <username> <application>

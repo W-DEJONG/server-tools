@@ -73,6 +73,7 @@ command_summary() {
     start-queue) echo "Start an application's Laravel queue Supervisor program" ;;
     stop-horizon) echo "Stop an application's Laravel Horizon Supervisor program" ;;
     stop-queue) echo "Stop an application's Laravel queue Supervisor program" ;;
+    switch-nginx) echo "Switch an application's nginx PHP mode between strict and legacy" ;;
     switch-php) echo "Switch an application to another PHP version" ;;
     test-backup) echo "Upload a small test object to verify S3 backup config" ;;
     update-grafana) echo "Replace the shipped Grafana dashboards with the current templates" ;;
@@ -266,6 +267,9 @@ create-app
 
 Create a web application layout, nginx vhost, and php-fpm pool.
 
+strict (the default) sends only public/index.php to PHP-FPM and returns
+404 for every other .php file. legacy runs any .php file under public/.
+
 Usage:
   server-tool create-app <username> <application> [options] [-y]
 
@@ -283,6 +287,7 @@ Options:
   --admin-password PASS      Remote admin password (prompted if omitted)
   --user-host HOST           MySQL user host (default %)
   -p, --php VERSION          PHP version for the fpm pool
+  --nginx strict|legacy      Nginx PHP mode (default: strict)
   -y, --yes                  Skip confirmation prompts
 
 Examples:
@@ -290,6 +295,7 @@ Examples:
   server-tool create-app testdev demo -d mijnapp -t mysql -y
   server-tool create-app testdev demo -d mijnapp -t mysql --host db.internal --admin-user root -y
   server-tool create-app testdev demo -d mijnapp -t pgsql --host db.internal --admin-user postgres -y
+  server-tool create-app testdev demo --nginx legacy -y
 
 See also:
   server-tool help app-structure
@@ -1097,6 +1103,33 @@ Options:
 Examples:
   server-tool stop-queue testdev demo -y
   server-tool stop-queue testdev demo --disable -y
+EOF
+      ;;
+    switch-nginx)
+      cat <<'EOF'
+switch-nginx
+
+Switch an application's nginx PHP mode.
+
+strict sends only public/index.php to PHP-FPM and returns 404 for every
+other .php file. legacy runs any .php file that exists under public/.
+New applications use strict. Existing configs without a mode marker are
+treated as legacy. HTTPS, server_name, and the PHP socket are kept.
+
+Usage:
+  server-tool switch-nginx <username> <application> [-m strict|legacy] [-y]
+
+Arguments:
+  username       Linux user that owns the application
+  application    Application folder under /home/<username>/
+
+Options:
+  -m, --mode MODE            Target mode: strict or legacy (required with -y)
+  -y, --yes                  Skip confirmation prompts
+
+Examples:
+  server-tool switch-nginx testdev demo -m strict -y
+  server-tool switch-nginx testdev demo -m legacy -y
 EOF
       ;;
     switch-php)

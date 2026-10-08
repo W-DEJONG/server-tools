@@ -166,7 +166,7 @@ else
   apply_cert_permissions
 
   render_nginx_app_conf \
-    "$SERVER_TOOL_ROOT/templates/nginx-laravel-ssl.conf" \
+    "$(nginx_laravel_template "$(nginx_php_mode_from_conf "$APP_NGINX_CONF")" 1)" \
     "$APP_NGINX_CONF" \
     "$username" \
     "$app_name" \

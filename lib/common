@@ -405,6 +405,81 @@ render_nginx_app_conf() {
       "$template" > "$dest"
 }
 
+nginx_php_mode_is_valid() {
+  case "$1" in
+    strict|legacy) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+nginx_php_mode_from_conf() {
+  local conf="$1"
+  local mode
+  mode="$(sed -n 's/^# nginx-php-mode: //p' "$conf" | head -1)"
+  case "$mode" in
+    strict|legacy) printf '%s\n' "$mode" ;;
+    *) printf '%s\n' legacy ;;
+  esac
+}
+
+nginx_laravel_template() {
+  local mode="$1"
+  local ssl="$2"
+  if ! nginx_php_mode_is_valid "$mode"; then
+    echo "Error: unsupported nginx PHP mode '$mode'."
+    echo "Available modes: strict legacy"
+    exit 1
+  fi
+  case "$ssl" in
+    0|1) ;;
+    *)
+      echo "Error: nginx template SSL flag must be 0 or 1."
+      exit 1
+      ;;
+  esac
+  if [ "$mode" = "strict" ] && [ "$ssl" = "0" ]; then
+    printf '%s\n' "$SERVER_TOOL_ROOT/templates/nginx-laravel.conf"
+  elif [ "$mode" = "strict" ] && [ "$ssl" = "1" ]; then
+    printf '%s\n' "$SERVER_TOOL_ROOT/templates/nginx-laravel-ssl.conf"
+  elif [ "$ssl" = "0" ]; then
+    printf '%s\n' "$SERVER_TOOL_ROOT/templates/nginx-laravel-legacy.conf"
+  else
+    printf '%s\n' "$SERVER_TOOL_ROOT/templates/nginx-laravel-ssl-legacy.conf"
+  fi
+}
+
+select_nginx_php_mode() {
+  local mode
+  PS3='Which nginx PHP mode should this application use? '
+  select mode in strict legacy; do
+    if [ -n "$mode" ]; then
+      SELECTED_NGINX_PHP_MODE="$mode"
+      return 0
+    fi
+    echo "Invalid selection."
+  done
+}
+
+# resolve_nginx_php_mode [mode]
+# An empty mode with -y selects strict. An empty mode without -y prompts.
+resolve_nginx_php_mode() {
+  local requested="${1:-}"
+  if [ -n "$requested" ]; then
+    if ! nginx_php_mode_is_valid "$requested"; then
+      echo "Error: unsupported nginx PHP mode '$requested'."
+      echo "Available modes: strict legacy"
+      exit 1
+    fi
+    SELECTED_NGINX_PHP_MODE="$requested"
+    return 0
+  fi
+  if [ "${ASSUME_YES:-0}" = "1" ]; then
+    SELECTED_NGINX_PHP_MODE="strict"
+    return 0
+  fi
+  select_nginx_php_mode
+}
+
 reload_nginx() {
   nginx -t
   nginx -s reload

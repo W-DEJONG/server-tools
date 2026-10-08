@@ -5,8 +5,9 @@ create_user=0
 db_name=""
 db_type=""
 php_version=""
+nginx_php_mode=""
 positionals=()
-usage="Usage: server-tool create-app <username> <application> [-u] [-d <db_name>] [-t pgsql|mysql] [--host <host>] [--port <port>] [--admin-user <user>] [--admin-password <password>] [--user-host <mysql-user-host>] [-p <php-version>] [-y]"
+usage="Usage: server-tool create-app <username> <application> [-u] [-d <db_name>] [-t pgsql|mysql] [--host <host>] [--port <port>] [--admin-user <user>] [--admin-password <password>] [--user-host <mysql-user-host>] [-p <php-version>] [--nginx strict|legacy] [-y]"
 while [ $# -gt 0 ]; do
   if try_parse_remote_db_option "$@"; then
     shift "$CONSUMED"
@@ -42,6 +43,20 @@ while [ $# -gt 0 ]; do
         exit 1
       fi
       php_version="$2"
+      shift 2
+      ;;
+    --nginx)
+      if [ -z "${2:-}" ]; then
+        echo "Error: --nginx requires strict or legacy"
+        echo "$usage"
+        exit 1
+      fi
+      if ! nginx_php_mode_is_valid "$2"; then
+        echo "Error: unsupported nginx PHP mode '$2'."
+        echo "Available modes: strict legacy"
+        exit 1
+      fi
+      nginx_php_mode="$2"
       shift 2
       ;;
     *)
@@ -111,6 +126,8 @@ else
         0
 fi
 php_version="$SELECTED_VERSION"
+resolve_nginx_php_mode "$nginx_php_mode"
+nginx_php_mode="$SELECTED_NGINX_PHP_MODE"
 ensure_php_fpm "$php_version"
 
 user_root="/home/$username"
@@ -122,6 +139,7 @@ if [ -d "$app_root" ]; then
 fi
 echo "Application root: $app_root"
 echo "PHP version: $php_version"
+echo "Nginx PHP mode: $nginx_php_mode"
 
 if [ -n "$db_name" ]; then
   echo "Creating $(db_type_label) database $db_name..."
@@ -167,7 +185,7 @@ echo "include=$app_root/php-fpm/${app_name}.conf" > "/etc/php/$php_version/fpm/p
 
 : > "$app_root/nginx/auth.inc"
 render_nginx_app_conf \
-    "$SERVER_TOOL_ROOT/templates/nginx-laravel.conf" \
+    "$(nginx_laravel_template "$nginx_php_mode" 0)" \
     "$app_root/nginx/${app_name}.conf" \
     "$username" \
     "$app_name" \

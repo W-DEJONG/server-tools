@@ -1,0 +1,111 @@
+#!/bin/bash
+set -eo pipefail
+
+nginx_php_mode=""
+positionals=()
+usage="Usage: server-tool switch-nginx <username> <application> [-m strict|legacy] [-y]"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -m|--mode)
+      if [ -z "${2:-}" ]; then
+        echo "Error: -m requires strict or legacy"
+        echo "$usage"
+        exit 1
+      fi
+      if ! nginx_php_mode_is_valid "$2"; then
+        echo "Error: unsupported nginx PHP mode '$2'."
+        echo "Available modes: strict legacy"
+        exit 1
+      fi
+      nginx_php_mode="$2"
+      shift 2
+      ;;
+    *)
+      positionals+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ ${#positionals[@]} -ne 2 ]; then
+  echo "$usage"
+  exit 1
+fi
+
+username="${positionals[0]}"
+app_name="${positionals[1]}"
+require_application "$username" "$app_name"
+
+current_mode="$(nginx_php_mode_from_conf "$APP_NGINX_CONF")"
+if [ -z "$nginx_php_mode" ]; then
+  if [ "${ASSUME_YES:-0}" = "1" ]; then
+    echo "Error: -m is required with -y."
+    echo "$usage"
+    exit 1
+  fi
+  select_nginx_php_mode
+  nginx_php_mode="$SELECTED_NGINX_PHP_MODE"
+fi
+
+if [ "$nginx_php_mode" = "$current_mode" ]; then
+  echo "Error: application '$app_name' already uses nginx PHP mode ${nginx_php_mode}."
+  exit 1
+fi
+
+php_version="$(app_php_version_from_nginx "$APP_NGINX_CONF")"
+if [ -z "$php_version" ]; then
+  echo "Error: could not determine PHP version from $APP_NGINX_CONF"
+  exit 1
+fi
+
+server_names="$(app_server_names_from_nginx "$APP_NGINX_CONF")"
+if [ -z "$server_names" ]; then
+  server_names="$app_name"
+fi
+
+ssl=0
+ssl_cert=""
+ssl_key=""
+if grep -q 'listen 443' "$APP_NGINX_CONF"; then
+  ssl=1
+  ssl_cert="$(app_ssl_cert_from_nginx "$APP_NGINX_CONF")"
+  ssl_key="$(app_ssl_key_from_nginx "$APP_NGINX_CONF")"
+  if [ -z "$ssl_cert" ] || [ -z "$ssl_key" ]; then
+    echo "Error: HTTPS is enabled but certificate paths were not found in $APP_NGINX_CONF"
+    exit 1
+  fi
+fi
+
+echo "Username: $username"
+echo "Application: $app_name"
+echo "Current nginx PHP mode: $current_mode"
+echo "New nginx PHP mode: $nginx_php_mode"
+confirm_or_exit "This will switch application '$app_name' from nginx PHP mode ${current_mode} to ${nginx_php_mode}. Do you want to proceed? (y/n): "
+
+if [ "$ssl" -eq 1 ]; then
+  render_nginx_app_conf \
+    "$(nginx_laravel_template "$nginx_php_mode" 1)" \
+    "$APP_NGINX_CONF" \
+    "$username" \
+    "$app_name" \
+    "$APP_ROOT" \
+    "$php_version" \
+    "$server_names" \
+    "$ssl_cert" \
+    "$ssl_key"
+else
+  render_nginx_app_conf \
+    "$(nginx_laravel_template "$nginx_php_mode" 0)" \
+    "$APP_NGINX_CONF" \
+    "$username" \
+    "$app_name" \
+    "$APP_ROOT" \
+    "$php_version" \
+    "$server_names"
+fi
+chown "$username:$username" "$APP_NGINX_CONF"
+reload_nginx
+
+echo
+echo "Application '$app_name' now uses nginx PHP mode ${nginx_php_mode}."
+echo "  Previous: ${current_mode}"
