@@ -686,8 +686,11 @@ Enable HTTPS with Let's Encrypt or a self-signed certificate.
 Without --self-signed, certbot is used. Let's Encrypt auto-renew is
 checked (certbot.timer or /etc/cron.d/certbot) and enabled if needed.
 Existing server_name values are kept and -d is merged in. Let's Encrypt
-is requested for the full name list. --renew reissues the certificate;
-if no Let's Encrypt live directory exists, a self-signed cert is used.
+is requested for the full name list. If HTTPS is already enabled with a
+self-signed certificate, running enable-ssl again without --self-signed
+replaces that certificate with Let's Encrypt. --renew reissues the
+requested certificate type. Use --self-signed --renew to reissue a
+self-signed certificate.
 
 Usage:
   server-tool enable-ssl <username> <application> [options] [-y]

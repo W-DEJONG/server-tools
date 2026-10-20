@@ -918,6 +918,65 @@ if grep -q 'extra.example.test' /var/lib/server-tool/monitoring/blackbox-targets
     exit 1
 fi
 
+echo "==> enable-ssl testdev demo replaces self-signed with Let's Encrypt"
+cat > /usr/local/bin/certbot <<'EOF'
+#!/bin/bash
+set -euo pipefail
+domain=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --cert-name)
+            domain="$2"
+            shift 2
+            ;;
+        -d|--domain)
+            if [ -z "$domain" ]; then
+                domain="$2"
+            fi
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+if [ -z "$domain" ]; then
+    echo "certbot stub: missing domain" >&2
+    exit 1
+fi
+live="/etc/letsencrypt/live/${domain}"
+mkdir -p "$live"
+openssl req -x509 -nodes -newkey rsa:2048 \
+    -keyout "${live}/privkey.pem" \
+    -out "${live}/fullchain.pem" \
+    -subj "/CN=${domain}/O=Lets Encrypt Stub" \
+    -days 30 >/dev/null 2>&1
+EOF
+chmod 755 /usr/local/bin/certbot
+server-tool enable-ssl testdev demo -d demo.example.test -e admin@example.test -y
+cmp /etc/letsencrypt/live/demo.example.test/fullchain.pem /home/testdev/demo/nginx/ssl/demo.example.test.pem
+cmp /etc/letsencrypt/live/demo.example.test/privkey.pem /home/testdev/demo/nginx/ssl/demo.example.test.key
+openssl x509 -in /home/testdev/demo/nginx/ssl/demo.example.test.pem -noout -subject | grep -q 'Lets Encrypt Stub'
+test -f /etc/letsencrypt/renewal-hooks/deploy/testdev_demo.sh
+grep -q '/home/testdev/demo/nginx/ssl/demo.example.test.pem' /etc/letsencrypt/renewal-hooks/deploy/testdev_demo.sh
+test "$(verbose_app_field testdev demo SSL)" = letsencrypt
+grep -q "listen 443 ssl" /home/testdev/demo/nginx/demo.conf
+
+echo "==> enable-ssl again leaves the Let's Encrypt certificate in place"
+ssl_checksum="$(sha256sum /home/testdev/demo/nginx/ssl/demo.example.test.pem | awk '{print $1}')"
+enable_ssl_again="$(server-tool enable-ssl testdev demo -d demo.example.test -y)"
+grep -q 'leaving the nginx config unchanged' <<< "$enable_ssl_again"
+grep -q 'HTTPS is already enabled.' <<< "$enable_ssl_again"
+test "$(sha256sum /home/testdev/demo/nginx/ssl/demo.example.test.pem | awk '{print $1}')" = "$ssl_checksum"
+test "$(verbose_app_field testdev demo SSL)" = letsencrypt
+
+echo "==> enable-ssl --renew reissues Let's Encrypt"
+server-tool enable-ssl testdev demo -d demo.example.test --renew -y
+test "$(sha256sum /home/testdev/demo/nginx/ssl/demo.example.test.pem | awk '{print $1}')" != "$ssl_checksum"
+openssl x509 -in /home/testdev/demo/nginx/ssl/demo.example.test.pem -noout -subject | grep -q 'Lets Encrypt Stub'
+test "$(verbose_app_field testdev demo SSL)" = letsencrypt
+rm -f /usr/local/bin/certbot
+
 echo "==> enable-scheduler testdev demo"
 test -d /home/testdev/demo/cron
 server-tool enable-scheduler testdev demo -y
