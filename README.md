@@ -37,6 +37,8 @@ server-tool install <package> [<version> ...] [<package> ...] [-y]
 server-tool install nginx
 server-tool install php
 server-tool install php -y 8.4 8.5
+server-tool update-php
+server-tool update-php -y
 server-tool install npm
 server-tool install npm -y 24
 server-tool install npm -y 22 24

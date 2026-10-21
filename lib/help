@@ -78,6 +78,7 @@ command_summary() {
     switch-php) echo "Switch an application to another PHP version" ;;
     test-backup) echo "Upload a small test object to verify S3 backup config" ;;
     update-grafana) echo "Replace the shipped Grafana dashboards with the current templates" ;;
+    update-php) echo "Upgrade every installed PHP version to the latest patch" ;;
     update-probes) echo "Update Alloy config, application log access, nginx request logs, and HTTP probes" ;;
     *) echo "No summary available" ;;
   esac
@@ -1224,6 +1225,26 @@ Options:
 
 Examples:
   server-tool update-grafana -y
+EOF
+      ;;
+    update-php)
+      cat <<'EOF'
+update-php
+
+Upgrade every installed PHP version to the latest patch from the Sury
+repository. Each minor version stays the same (8.4 stays 8.4). Package
+configuration is left unchanged. Running PHP-FPM services are checked
+and restarted.
+
+Usage:
+  server-tool update-php [-y]
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool update-php
+  server-tool update-php -y
 EOF
       ;;
     update-probes)

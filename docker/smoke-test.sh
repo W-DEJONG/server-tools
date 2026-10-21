@@ -93,9 +93,14 @@ echo "==> help install alloy and monitoring"
 server-tool help install alloy | grep -q -- '--api-key-file'
 server-tool help install monitoring | grep -q -- '-d <domain>'
 server-tool help update-grafana | grep -q 'Usage:'
+server-tool help update-php | grep -q 'Usage:'
 server-tool help update-probes | grep -q 'Usage:'
 if server-tool update-grafana -y; then
     echo "Expected update-grafana to fail before monitoring is installed"
+    exit 1
+fi
+if server-tool update-php -y; then
+    echo "Expected update-php to fail before PHP is installed"
     exit 1
 fi
 if server-tool update-probes -y; then
@@ -1098,6 +1103,15 @@ grep -q '/home/testdev/demo2/nginx/.htpasswd' /home/testdev/demo2/nginx/auth.inc
 grep -q 'default "Staging"' /home/testdev/demo2/nginx/auth-map.conf
 grep -qF '~^/webhooks(/|\?|$)' /home/testdev/demo2/nginx/auth-map.conf
 grep -qF '~^/up(/|\?|$)' /home/testdev/demo2/nginx/auth-map.conf
+
+echo "==> update-php upgrades every installed version"
+update_php_out="$(server-tool update-php -y)"
+grep -qF "  ${php_version}:" <<<"$update_php_out"
+grep -qF "  ${other_php_version}:" <<<"$update_php_out"
+systemctl is-active --quiet "php${php_version}-fpm"
+systemctl is-active --quiet "php${other_php_version}-fpm"
+php_fpm_info="$(php-fpm${php_version} -i)"
+grep -qE 'upload_max_filesize.*150M' <<<"$php_fpm_info"
 
 echo "==> disable-scheduler testdev demo2"
 server-tool disable-scheduler testdev demo2 -y
