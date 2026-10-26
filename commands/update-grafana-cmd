@@ -18,7 +18,12 @@ confirm_or_exit "This will replace the shipped Server tools dashboards. Continue
 
 install_grafana_dashboards
 
+if systemctl is-active --quiet grafana-server; then
+  systemctl try-restart grafana-server
+fi
+
 echo
 echo "Grafana dashboards updated."
 echo "  Dashboards: /var/lib/grafana/dashboards/server-tools"
-echo "Grafana reloads these files within 30 seconds."
+echo "  Alert:      /etc/grafana/provisioning/alerting/backup-failed.yaml"
+echo "Dashboards reload within 30 seconds. A running Grafana is restarted so the alert rule is loaded."

@@ -2725,6 +2725,9 @@ install_grafana_dashboards() {
   install -m 644 -o grafana -g grafana "$src/dashboards/server.json" "$dest/server.json"
   install -m 644 -o grafana -g grafana "$src/dashboards/http.json" "$dest/http.json"
   install -m 644 -o grafana -g grafana "$src/dashboards/logs.json" "$dest/logs.json"
+  install -m 644 -o grafana -g grafana "$src/dashboards/backups.json" "$dest/backups.json"
+  mkdir -p /etc/grafana/provisioning/alerting
+  install -m 644 -o root -g grafana "$src/alerting/backup-failed.yaml" /etc/grafana/provisioning/alerting/backup-failed.yaml
 }
 
 install_alloy_config() {
@@ -2749,6 +2752,12 @@ install_alloy_config() {
   install -d -m 755 /etc/alloy
   install -m 640 -o root -g alloy "$tmp" /etc/alloy/config.alloy
   rm -f "$tmp"
+
+  install -d -m 755 /var/log/server-tool
+  if [ ! -f /var/log/server-tool/backup.log ]; then
+    touch /var/log/server-tool/backup.log
+  fi
+  chmod 644 /var/log/server-tool/backup.log
 }
 
 monitoring_blackbox_targets_file() {

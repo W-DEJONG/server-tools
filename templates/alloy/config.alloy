@@ -205,6 +205,35 @@ loki.source.file "access_logs" {
   }
 }
 
+loki.process "backup_logs" {
+  stage.regex {
+    expression = `^\S+ (?P<level>INFO|ERROR) backup username=(?P<username>\S+) application=(?P<application>\S+) result=(?P<result>ok|failed)\b`
+  }
+
+  stage.labels {
+    values = {
+      level       = "",
+      username    = "",
+      application = "",
+      result      = "",
+    }
+  }
+
+  forward_to = [loki.write.logs.receiver]
+}
+
+loki.source.file "backup_logs" {
+  targets = [
+    { __path__ = "/var/log/server-tool/backup.log", logtype = "backup" },
+  ]
+  forward_to = [loki.process.backup_logs.receiver]
+
+  file_match {
+    enabled     = true
+    sync_period = "10s"
+  }
+}
+
 prometheus.relabel "access_requests" {
   forward_to = [prometheus.remote_write.metrics.receiver]
 

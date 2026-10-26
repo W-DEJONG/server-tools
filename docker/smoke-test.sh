@@ -388,6 +388,12 @@ grep -qF '$__range' /var/lib/grafana/dashboards/server-tools/http.json
 grep -q 'label_values(username)' /var/lib/grafana/dashboards/server-tools/logs.json
 grep -q 'label_values(logfile)' /var/lib/grafana/dashboards/server-tools/logs.json
 grep -q 'label_values(level)' /var/lib/grafana/dashboards/server-tools/logs.json
+grep -q 'server-tools-backups' /var/lib/grafana/dashboards/server-tools/backups.json
+grep -q 'Failures in 24h' /var/lib/grafana/dashboards/server-tools/backups.json
+grep -q '\[24h\]' /var/lib/grafana/dashboards/server-tools/backups.json
+grep -q 'noDataState: OK' /etc/grafana/provisioning/alerting/backup-failed.yaml
+grep -q 'result="failed"' /etc/grafana/provisioning/alerting/backup-failed.yaml
+grep -q 'uid: backup_failed' /etc/grafana/provisioning/alerting/backup-failed.yaml
 grep -q 'GF_AUTH_ANONYMOUS_ENABLED=false' /etc/systemd/system/grafana-server.service.d/server-tool.conf
 grep -q 'GF_SERVER_ROOT_URL=https://monitor.example.test/' /etc/systemd/system/grafana-server.service.d/server-tool.conf
 systemctl is-active --quiet prometheus
@@ -440,6 +446,10 @@ grep -F 'logfile' /etc/alloy/config.alloy >/dev/null
 grep -F '(?P<level>DEBUG|INFO|NOTICE|WARNING|ERROR|CRITICAL|ALERT|EMERGENCY)' /etc/alloy/config.alloy >/dev/null
 grep -F '/home/*/*/log/*.log' /etc/alloy/config.alloy >/dev/null
 grep -F '/home/*/*/log/access.log' /etc/alloy/config.alloy >/dev/null
+grep -F '/var/log/server-tool/backup.log' /etc/alloy/config.alloy >/dev/null
+grep -F 'logtype = "backup"' /etc/alloy/config.alloy >/dev/null
+grep -F '(?P<result>ok|failed)' /etc/alloy/config.alloy >/dev/null
+test -f /var/log/server-tool/backup.log
 grep -F 'loki_process_custom_nginx_requests_total' /etc/alloy/config.alloy >/dev/null
 grep -F 'host=(?P<domain>' /etc/alloy/config.alloy >/dev/null
 if grep -F 'releases/' /etc/alloy/config.alloy; then
@@ -1371,6 +1381,7 @@ grep -qxF 'current/public/storage' <<< "$zip_list"
 ! grep -q 'current/public/storage/' <<< "$zip_list"
 test "$(unzip -p "$backup_zip" current/public/storage)" = "../../shared/storage"
 unzip -Z "$backup_zip" current/public/storage | grep -q '^l'
+grep -q 'username=testdev application=demo result=ok ' /var/log/server-tool/backup.log
 grep -q '^db/demo-.*\.dump$' <<< "$zip_list"
 ! grep -q '^\.env.db$' <<< "$zip_list"
 ! grep -q '\.env$' <<< "$zip_list"

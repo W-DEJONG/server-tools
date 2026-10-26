@@ -77,7 +77,7 @@ command_summary() {
     switch-nginx) echo "Switch an application's nginx PHP mode between strict and legacy" ;;
     switch-php) echo "Switch an application to another PHP version" ;;
     test-backup) echo "Upload a small test object to verify S3 backup config" ;;
-    update-grafana) echo "Replace the shipped Grafana dashboards with the current templates" ;;
+    update-grafana) echo "Replace the shipped Grafana dashboards and install the backup alert" ;;
     update-php) echo "Upgrade every installed PHP version to the latest patch" ;;
     update-probes) echo "Update Alloy config, application log access, nginx request logs, and HTTP probes" ;;
     *) echo "No summary available" ;;
@@ -257,6 +257,10 @@ upload.
 A symlink that points inside the application is stored as a link. Its
 files stay once, at their real path. current itself is still followed, so
 the active release is archived as current/.
+
+Each backup appends one line to /var/log/server-tool/backup.log. A failed
+backup becomes a Grafana alert after the application server runs
+update-probes and the monitoring server runs update-grafana.
 
 Usage:
   server-tool backup-app <username> <application> [--enable|--disable] [-y]
@@ -1228,8 +1232,10 @@ EOF
 update-grafana
 
 Replace the shipped Server tools dashboards with the templates from this
-server-tool install. Datasources, passwords and nginx are left unchanged.
-Grafana reloads the files within 30 seconds.
+server-tool install, and install the backup failure alert. Datasources,
+passwords and nginx are left unchanged. Dashboards reload within 30
+seconds. Grafana is restarted when it is already running so the alert
+rule is loaded.
 
 Run this on the monitoring server after server-tool self-update.
 
@@ -1272,6 +1278,7 @@ Alloy's read access to application logs. The existing monitoring URL and
 API key are retained, and Alloy is restarted after validation.
 Each dotted nginx server_name becomes a probe labeled with that domain.
 Nginx and Laravel logs are read from log/ and current/storage/logs.
+Backup results are read from /var/log/server-tool/backup.log.
 Application access logs are switched to the server_tool format, which
 records the requested host, and nginx is reloaded.
 Run this on an application server after server-tool self-update.
@@ -1632,8 +1639,9 @@ localhost. A generated API key and Grafana admin password are stored in
 and password.
 
 Certbot creates the certificate. The Server tools folder in Grafana
-contains the server, HTTP check and application log dashboards. Refresh
-those dashboards later with: server-tool update-grafana
+contains the server, HTTP check, application log and backup dashboards,
+and an alert when a backup fails. Refresh those later with:
+server-tool update-grafana
 
 Usage:
   server-tool install monitoring -d <domain> -e <email> [-y]

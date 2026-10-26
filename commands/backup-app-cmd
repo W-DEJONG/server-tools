@@ -126,13 +126,59 @@ else
 fi
 confirm_or_exit "This will backup $username/$app_name and upload it to S3. Do you want to proceed? (y/n): "
 
-workdir=""
-cleanup_backup_workdir() {
-  if [ -n "$workdir" ] && [ -d "$workdir" ]; then
-    rm -rf "$workdir"
-  fi
+backup_logged=0
+backup_phase="prepare failed"
+backup_started="$(date +%s)"
+backup_bytes=0
+backup_duration=0
+
+backup_log_message() {
+  local message="$1"
+  message="${message//$'\n'/ }"
+  message="${message//$'\r'/ }"
+  message="${message//\"/}"
+  printf '%s' "$message"
 }
-trap cleanup_backup_workdir EXIT
+
+backup_record_result() {
+  local result="$1"
+  local message="${2:-}"
+  local level stamp extra dir file
+  dir="/var/log/server-tool"
+  file="$dir/backup.log"
+  if [ "$result" = "ok" ]; then
+    level="INFO"
+    extra=" bytes=${backup_bytes} duration_seconds=${backup_duration} destination=${s3_uri}"
+  else
+    level="ERROR"
+    message="$(backup_log_message "$message")"
+    if [ -z "$message" ]; then
+      message="backup failed"
+    fi
+    extra=" destination=${s3_uri} message=\"${message}\""
+  fi
+  stamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  mkdir -p "$dir" || return 0
+  chmod 755 "$dir" || true
+  printf '%s %s backup username=%s application=%s result=%s%s\n' \
+    "$stamp" "$level" "$username" "$app_name" "$result" "$extra" >> "$file" || return 0
+  chmod 644 "$file" || true
+  backup_logged=1
+}
+
+backup_finish() {
+  local status=$?
+  if [ "$backup_logged" -eq 0 ]; then
+    backup_record_result failed "$backup_phase" || true
+  fi
+  if [ -n "$workdir" ] && [ -d "$workdir" ]; then
+    rm -rf "$workdir" || true
+  fi
+  exit "$status"
+}
+
+workdir=""
+trap backup_finish EXIT
 
 workdir="$(large_temp_dir)" || exit
 chmod 700 "$workdir"
@@ -140,6 +186,7 @@ echo "Work directory: $workdir"
 zip_file="$workdir/${app_name}-${weekday}.zip"
 
 if [ -f "$APP_ROOT/.env.db" ]; then
+  backup_phase="database dump failed"
   mkdir -p "$workdir/db"
   "$SERVER_TOOL_ROOT/server-tool" dump-db -y "$username" "$app_name" "$workdir/db"
 else
@@ -382,6 +429,7 @@ backup_store_internal_symlinks() {
   )
 }
 
+backup_phase="zip failed"
 backup_collect_internal_symlinks
 
 echo "Creating archive..."
@@ -396,8 +444,14 @@ fi
 
 backup_store_internal_symlinks
 
+backup_phase="upload failed"
 echo "Uploading archive to $s3_uri"
 aws_s3_upload "$zip_file" "$s3_uri"
+
+backup_phase="record the result failed"
+backup_bytes="$(stat -c '%s' "$zip_file")" || exit
+backup_duration="$(( $(date +%s) - backup_started ))"
+backup_record_result ok
 
 echo
 echo "Backup uploaded to $s3_uri"
