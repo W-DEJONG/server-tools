@@ -3065,6 +3065,65 @@ install_grafana_dashboards() {
   install -m 644 -o root -g grafana "$src/alerting/backup-failed.yaml" /etc/grafana/provisioning/alerting/backup-failed.yaml
 }
 
+monitoring_config_file() {
+  printf '%s\n' /etc/server-tool/monitoring.conf
+}
+
+write_prometheus_server_tool_unit() {
+  local prom_bin
+  local prom_args=()
+
+  if ! command -v prometheus >/dev/null 2>&1; then
+    echo "Error: prometheus is not installed."
+    exit 1
+  fi
+
+  prom_bin="$(command -v prometheus)"
+  prom_args=(
+    "$prom_bin"
+    --config.file=/etc/prometheus/prometheus.yml
+    --storage.tsdb.path=/var/lib/prometheus
+    --storage.tsdb.retention.time=30d
+    --web.listen-address=127.0.0.1:9090
+    --web.enable-remote-write-receiver
+    --web.enable-lifecycle
+  )
+  if [ -d /etc/prometheus/consoles ]; then
+    prom_args+=(--web.console.templates=/etc/prometheus/consoles)
+  fi
+  if [ -d /etc/prometheus/console_libraries ]; then
+    prom_args+=(--web.console.libraries=/etc/prometheus/console_libraries)
+  fi
+
+  install -d /etc/systemd/system/prometheus.service.d
+  cat > /etc/systemd/system/prometheus.service.d/server-tool.conf <<EOF
+[Service]
+ExecStart=
+ExecStart=${prom_args[*]}
+EOF
+}
+
+write_loki_server_tool_config() {
+  local loki_bin
+
+  if ! command -v loki >/dev/null 2>&1; then
+    echo "Error: loki is not installed."
+    exit 1
+  fi
+
+  loki_bin="$(command -v loki)"
+  install -d -m 755 /etc/loki /var/lib/loki
+  install -m 644 "$SERVER_TOOL_ROOT/templates/loki/server-tool.yaml" /etc/loki/server-tool.yaml
+  chown -R loki /var/lib/loki
+  install -d /etc/systemd/system/loki.service.d
+  cat > /etc/systemd/system/loki.service.d/server-tool.conf <<EOF
+[Service]
+ExecStart=
+ExecStart=${loki_bin} -config.file=/etc/loki/server-tool.yaml
+EOF
+  loki -config.file=/etc/loki/server-tool.yaml -verify-config
+}
+
 alloy_layout_file() {
   printf '%s\n' /etc/server-tool/alloy-layout
 }

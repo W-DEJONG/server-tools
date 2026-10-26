@@ -1,0 +1,37 @@
+#!/bin/bash
+set -eo pipefail
+
+usage="Usage: server-tool update-monitoring [-y]"
+if [ $# -ne 0 ]; then
+  echo "$usage"
+  exit 1
+fi
+
+config="$(monitoring_config_file)"
+if [ ! -f "$config" ]; then
+  echo "Error: monitoring is not installed."
+  echo "Run: server-tool install monitoring -d <domain> -e <email>"
+  exit 1
+fi
+
+if ! command -v prometheus >/dev/null 2>&1 || ! command -v loki >/dev/null 2>&1; then
+  echo "Error: Prometheus or Loki is missing."
+  echo "Run: server-tool install monitoring -d <domain> -e <email>"
+  exit 1
+fi
+
+confirm_or_exit "This will refresh Prometheus and Loki from the current server-tool templates. API keys, Grafana and nginx stay unchanged. Continue? (y/n): "
+
+write_prometheus_server_tool_unit
+write_loki_server_tool_config
+systemctl daemon-reload
+systemctl restart prometheus
+systemctl restart loki
+
+echo
+echo "Monitoring stack updated."
+echo "  Prometheus: /etc/systemd/system/prometheus.service.d/server-tool.conf"
+echo "  Retention:  30d"
+echo "  Loki:       /etc/loki/server-tool.yaml"
+echo "API keys, Grafana and nginx were left unchanged."
+echo "Refresh dashboards separately with: server-tool update-grafana"

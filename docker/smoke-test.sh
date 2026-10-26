@@ -95,12 +95,17 @@ server-tool help install alloy | grep -q -- '--forge'
 server-tool help install alloy | grep -q 'Ubuntu 22.04'
 server-tool help install monitoring | grep -q -- '-d <domain>'
 server-tool help update-grafana | grep -q 'Usage:'
+server-tool help update-monitoring | grep -q 'Usage:'
 server-tool help update-php | grep -q 'Usage:'
 server-tool help check-php-upload-progress | grep -q 'Usage:'
 server-tool help check-php-upload-progress | grep -q -- '--check'
 server-tool help update-probes | grep -q 'Usage:'
 if server-tool update-grafana -y; then
     echo "Expected update-grafana to fail before monitoring is installed"
+    exit 1
+fi
+if server-tool update-monitoring -y; then
+    echo "Expected update-monitoring to fail before monitoring is installed"
     exit 1
 fi
 if server-tool update-php -y; then
@@ -420,6 +425,13 @@ grep -q '{{ $labels.application }}' /etc/grafana/provisioning/alerting/backup-fa
 grep -q 'GF_AUTH_ANONYMOUS_ENABLED=false' /etc/systemd/system/grafana-server.service.d/server-tool.conf
 grep -q 'GF_SERVER_ROOT_URL=https://monitor.example.test/' /etc/systemd/system/grafana-server.service.d/server-tool.conf
 grep -q -- '--storage.tsdb.retention.time=30d' /etc/systemd/system/prometheus.service.d/server-tool.conf
+sed -i 's/--storage.tsdb.retention.time=30d/--storage.tsdb.retention.time=15d/' /etc/systemd/system/prometheus.service.d/server-tool.conf
+grep -q -- '--storage.tsdb.retention.time=15d' /etc/systemd/system/prometheus.service.d/server-tool.conf
+server-tool update-monitoring -y
+grep -q -- '--storage.tsdb.retention.time=30d' /etc/systemd/system/prometheus.service.d/server-tool.conf
+[ "$(cat /etc/server-tool/monitoring-api.key)" = "$monitoring_key" ]
+[ "$(sed -n 's/^GRAFANA_ADMIN_PASSWORD=//p' /etc/server-tool/monitoring.conf)" = "$monitoring_password" ]
+grep -q 'retention_period: 744h' /etc/loki/server-tool.yaml
 systemctl is-active --quiet prometheus
 systemctl is-active --quiet loki
 systemctl is-active --quiet grafana-server
