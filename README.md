@@ -4,6 +4,8 @@ This package contains scripts for installing and maintaining Debian web servers.
 
 Supported Debian releases: **12 (bookworm)** and **13 (trixie)**.
 
+Laravel Forge servers on Ubuntu 22.04 or 24.04 can send logs to an existing monitoring server. Install this package there and run only `server-tool install alloy --forge`. The API key file is the one written on the monitoring server at `/etc/server-tool/monitoring-api.key`.
+
 The entry command is `server-tool`.
 
 Usage:
@@ -63,6 +65,9 @@ server-tool install monitoring -d grafana.example.com -e admin@example.com
 server-tool install monitoring -d grafana.example.com -e admin@example.com -y
 server-tool install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key
 server-tool install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key -y
+# Laravel Forge on Ubuntu 22.04 or 24.04. Copy the monitoring API key onto that server first.
+server-tool install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key --forge
+server-tool install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key --forge -y
 server-tool update-grafana
 server-tool update-grafana -y
 server-tool update-probes

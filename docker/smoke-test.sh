@@ -91,6 +91,8 @@ server-tool help app-structure | grep -q 'current'
 
 echo "==> help install alloy and monitoring"
 server-tool help install alloy | grep -q -- '--api-key-file'
+server-tool help install alloy | grep -q -- '--forge'
+server-tool help install alloy | grep -q 'Ubuntu 22.04'
 server-tool help install monitoring | grep -q -- '-d <domain>'
 server-tool help update-grafana | grep -q 'Usage:'
 server-tool help update-php | grep -q 'Usage:'
@@ -117,6 +119,10 @@ fi
 echo "==> install alloy and monitoring require arguments"
 if server-tool install alloy -y; then
     echo "Expected install alloy without arguments to fail"
+    exit 1
+fi
+if server-tool install alloy --forge -y; then
+    echo "Expected install alloy --forge without a URL to fail"
     exit 1
 fi
 if server-tool install monitoring -y; then
@@ -474,6 +480,8 @@ if grep -F 'releases/' /etc/alloy/config.alloy; then
     exit 1
 fi
 test -f /var/lib/server-tool/monitoring/blackbox-targets.json
+grep -qxF server-tool /etc/server-tool/alloy-layout
+test ! -f /etc/cron.d/server-tool-forge-monitoring
 
 echo "==> deployer storage symlink keeps the same log file"
 deploy_sim="$(mktemp -d)"
@@ -1480,5 +1488,139 @@ redis-cli ping
 test -x /usr/local/bin/cachetool
 test -x /usr/local/bin/composer
 composer --version --no-ansi
+
+echo "==> forge alloy layout"
+export SERVER_TOOL_ROOT="$repo_dir"
+# shellcheck disable=SC1091
+. "$repo_dir/lib/common"
+
+if ! host_is_supported debian bookworm install nginx; then
+    echo "Expected Debian 12 to allow every command"
+    exit 1
+fi
+if host_is_supported debian bullseye install nginx; then
+    echo "Expected Debian 11 to be rejected"
+    exit 1
+fi
+if ! host_is_supported ubuntu jammy install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key --forge; then
+    echo "Expected Ubuntu 22.04 to allow install alloy --forge"
+    exit 1
+fi
+if ! host_is_supported ubuntu noble install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key --forge; then
+    echo "Expected Ubuntu 24.04 to allow install alloy --forge"
+    exit 1
+fi
+if host_is_supported ubuntu jammy install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key; then
+    echo "Expected Ubuntu to reject install alloy without --forge"
+    exit 1
+fi
+if host_is_supported ubuntu jammy install nginx; then
+    echo "Expected Ubuntu to reject install nginx"
+    exit 1
+fi
+if host_is_supported ubuntu jammy install nginx alloy --forge; then
+    echo "Expected Ubuntu to reject install alloy --forge combined with another package"
+    exit 1
+fi
+if host_is_supported ubuntu focal install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key --forge; then
+    echo "Expected Ubuntu 20.04 to be rejected"
+    exit 1
+fi
+if host_is_supported ubuntu noble update-probes; then
+    echo "Expected update-probes on Ubuntu to require a Forge install"
+    exit 1
+fi
+write_alloy_layout forge
+forge_update_ok=0
+if host_is_supported ubuntu noble update-probes; then
+    forge_update_ok=1
+fi
+write_alloy_layout server-tool
+if [ "$forge_update_ok" -ne 1 ]; then
+    echo "Expected update-probes on Ubuntu after a Forge install"
+    exit 1
+fi
+grep -qxF server-tool /etc/server-tool/alloy-layout
+
+forge_cfg="$(mktemp)"
+render_alloy_config "https://monitor.example.test" "test-key" "forge-host" forge "$forge_cfg"
+grep -F '/home/*/*/storage/logs/*.log' "$forge_cfg" >/dev/null
+grep -F '/var/log/nginx/*-error.log' "$forge_cfg" >/dev/null
+grep -F '/var/log/nginx/*-access.log' "$forge_cfg" >/dev/null
+grep -F 'else }}forge{{ end }}' "$forge_cfg" >/dev/null
+grep -F 'loki_process_custom_nginx_requests_total' "$forge_cfg" >/dev/null
+grep -F 'https://monitor.example.test/loki/api/v1/push' "$forge_cfg" >/dev/null
+grep -F 'stage.multiline' "$forge_cfg" >/dev/null
+if grep -F 'backup.log' "$forge_cfg"; then
+    echo "Expected the Forge Alloy config to omit backup logs"
+    exit 1
+fi
+if grep -F 'host=(?P<domain>' "$forge_cfg"; then
+    echo "Expected the Forge Alloy config to take the domain from the nginx file name"
+    exit 1
+fi
+if grep -F 'releases/' "$forge_cfg"; then
+    echo "Expected the Forge Alloy config to skip release directories"
+    exit 1
+fi
+if grep -F '/home/*/*/current/storage/logs/*.log' "$forge_cfg"; then
+    echo "Expected the Forge Alloy config to read site storage/logs, not current/"
+    exit 1
+fi
+if grep -F '/home/*/*/log/*.log' "$forge_cfg"; then
+    echo "Expected the Forge Alloy config to skip server-tool nginx log directories"
+    exit 1
+fi
+rm -f "$forge_cfg"
+
+forge_site="/home/forge/demo.example.test"
+mkdir -p "$forge_site/storage/logs"
+echo '[2026-10-06 08:00:59] staging.ERROR: forge' > "$forge_site/storage/logs/laravel.log"
+chmod 750 /home/forge "$forge_site" "$forge_site/storage" "$forge_site/storage/logs"
+chmod 640 "$forge_site/storage/logs/laravel.log"
+grant_forge_log_access
+getfacl "$forge_site/storage/logs" | grep -q 'user:alloy:r-x'
+getfacl /home/forge | grep -q 'default:user:alloy:r-x'
+getfacl /home/testdev | grep -q 'user:alloy:r-x'
+if getfacl /home/testdev | grep -q 'default:user:alloy:'; then
+    echo "Expected Forge log access to leave server-tool homes unchanged"
+    exit 1
+fi
+
+forge_nginx_conf="/etc/nginx/sites-available/zz-forge-smoke"
+forge_nginx_link="/etc/nginx/sites-enabled/zz-forge-smoke"
+cat > "$forge_nginx_conf" <<'EOF'
+server {
+    listen 80;
+    listen [::]:80;
+    server_name forge.example.test;
+    return 301 https://forge.example.test$request_uri;
+}
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name forge.example.test;
+    root /home/forge/demo.example.test/current/public;
+}
+EOF
+ln -s "$forge_nginx_conf" "$forge_nginx_link"
+write_forge_blackbox_targets
+grep -q 'https://forge.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json
+grep -q '"username": "forge"' /var/lib/server-tool/monitoring/blackbox-targets.json
+grep -q '"application": "demo.example.test"' /var/lib/server-tool/monitoring/blackbox-targets.json
+grep -q '"domain": "forge.example.test"' /var/lib/server-tool/monitoring/blackbox-targets.json
+rm -f "$forge_nginx_link" "$forge_nginx_conf"
+write_monitoring_blackbox_targets
+if grep -q 'forge.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json; then
+    echo "Expected the Forge probe to be removed when Debian probes are restored"
+    exit 1
+fi
+rm -rf /home/forge
+
+install_forge_monitoring_cron
+grep -q 'update-probes -y' /etc/cron.d/server-tool-forge-monitoring
+grep -q 'PATH=' /etc/cron.d/server-tool-forge-monitoring
+remove_forge_monitoring_cron
+test ! -f /etc/cron.d/server-tool-forge-monitoring
 
 echo "==> smoke test passed"

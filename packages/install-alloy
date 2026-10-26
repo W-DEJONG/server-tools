@@ -6,7 +6,8 @@ source "$SERVER_TOOL_ROOT/lib/common"
 
 url=""
 api_key_file=""
-usage="Usage: server-tool install alloy --url <https://host> --api-key-file <file> [-y]"
+layout="server-tool"
+usage="Usage: server-tool install alloy --url <https://host> --api-key-file <file> [--forge] [-y]"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -27,6 +28,10 @@ while [ $# -gt 0 ]; do
       fi
       api_key_file="$2"
       shift 2
+      ;;
+    --forge)
+      layout="forge"
+      shift
       ;;
     *)
       echo "Error: unknown argument '$1'"
@@ -69,7 +74,11 @@ if ! [[ "$server_name" =~ ^[A-Za-z0-9._-]+$ ]]; then
   exit 1
 fi
 
-confirm_or_exit "This will install Grafana Alloy and send metrics and logs to ${url}. Do you want to proceed? (y/n): "
+if [ "$layout" = "forge" ]; then
+  confirm_or_exit "This will install Grafana Alloy and send metrics and logs from this Laravel Forge server to ${url}. Nginx site files are left unchanged. Do you want to proceed? (y/n): "
+else
+  confirm_or_exit "This will install Grafana Alloy and send metrics and logs to ${url}. Do you want to proceed? (y/n): "
+fi
 
 echo "Installing Grafana Alloy..."
 ensure_grafana_repo
@@ -82,14 +91,29 @@ if getent group adm >/dev/null; then
   usermod -a -G adm alloy
 fi
 
-install_alloy_config "$url" "$api_key" "$server_name"
+install_alloy_config "$url" "$api_key" "$server_name" "$layout"
+write_alloy_layout "$layout"
 
-sync_all_app_monitoring
+if [ "$layout" = "forge" ]; then
+  sync_forge_monitoring
+  install_forge_monitoring_cron
+else
+  sync_all_app_monitoring
+  remove_forge_monitoring_cron
+fi
 
 systemctl enable alloy
 systemctl restart alloy
 
 echo
-echo "Grafana Alloy is sending metrics and logs to ${url}."
-echo "  Config: /etc/alloy/config.alloy"
-echo "  Probes: $(monitoring_blackbox_targets_file)"
+if [ "$layout" = "forge" ]; then
+  echo "Grafana Alloy is sending Forge metrics and logs to ${url}."
+  echo "  Config: /etc/alloy/config.alloy"
+  echo "  Probes: $(monitoring_blackbox_targets_file)"
+  echo "  Cron: $(forge_monitoring_cron_file)"
+  echo "Nginx site files were left unchanged. New sites are picked up by the daily cron, or run: server-tool update-probes"
+else
+  echo "Grafana Alloy is sending metrics and logs to ${url}."
+  echo "  Config: /etc/alloy/config.alloy"
+  echo "  Probes: $(monitoring_blackbox_targets_file)"
+fi

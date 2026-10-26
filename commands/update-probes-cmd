@@ -9,7 +9,11 @@ fi
 
 if ! command -v alloy >/dev/null 2>&1; then
   echo "Error: Grafana Alloy is not installed."
-  echo "Run: server-tool install alloy --url <https://host> --api-key-file <file>"
+  if [ "$(alloy_layout)" = "forge" ]; then
+    echo "Run: server-tool install alloy --url <https://host> --api-key-file <file> --forge"
+  else
+    echo "Run: server-tool install alloy --url <https://host> --api-key-file <file>"
+  fi
   exit 1
 fi
 
@@ -25,14 +29,51 @@ server_name="$(hostname -s)"
 
 if [ -z "$url" ] || [ -z "$api_key" ]; then
   echo "Error: could not read the monitoring URL or API key from $config."
-  echo "Run server-tool install alloy once to repair the configuration."
+  if [ "$(alloy_layout)" = "forge" ]; then
+    echo "Run server-tool install alloy --forge once to repair the configuration."
+  else
+    echo "Run server-tool install alloy once to repair the configuration."
+  fi
   exit 1
+fi
+
+layout="$(alloy_layout)"
+if [ "$layout" = "forge" ]; then
+  confirm_or_exit "This will update Alloy, Forge log access and HTTP probes. Nginx site files are left unchanged. Continue? (y/n): "
+
+  tmp="$(mktemp)"
+  render_alloy_config "$url" "$api_key" "$server_name" forge "$tmp"
+  changed=0
+  if ! cmp -s "$tmp" "$config"; then
+    publish_alloy_config "$tmp"
+    changed=1
+  fi
+  rm -f "$tmp"
+
+  sync_forge_monitoring
+  install_forge_monitoring_cron
+  if [ "$changed" -eq 1 ]; then
+    systemctl restart alloy
+  fi
+
+  echo
+  echo "Grafana Alloy, Forge log access and HTTP probes updated."
+  echo "  Config: $config"
+  echo "  File: $(monitoring_blackbox_targets_file)"
+  echo "  Cron: $(forge_monitoring_cron_file)"
+  if [ "$changed" -eq 1 ]; then
+    echo "Alloy was restarted because its config changed."
+  else
+    echo "Alloy config is unchanged, so Alloy was not restarted."
+  fi
+  echo "Probe targets are picked up within 30 seconds."
+  exit 0
 fi
 
 confirm_or_exit "This will update Alloy, application log access, HTTP probes and nginx access logs. Continue? (y/n): "
 
 apply_nginx_request_log_format
-install_alloy_config "$url" "$api_key" "$server_name"
+install_alloy_config "$url" "$api_key" "$server_name" server-tool
 sync_all_app_monitoring
 systemctl restart alloy
 

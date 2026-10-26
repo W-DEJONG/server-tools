@@ -1328,6 +1328,11 @@ Application access logs are switched to the server_tool format, which
 records the requested host, and nginx is reloaded.
 Run this on an application server after server-tool self-update.
 
+On a Laravel Forge server the same command refreshes the Forge Alloy
+config, log access and the HTTP probes discovered from nginx. Forge nginx
+site files are not modified. Alloy restarts only when the config changed.
+A daily cron runs this refresh.
+
 Usage:
   server-tool update-probes [-y]
 
@@ -1383,6 +1388,7 @@ Examples:
   server-tool install postgresql redis php 8.4 -y
   server-tool install monitoring -d grafana.example.com -e admin@example.com -y
   server-tool install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key -y
+  server-tool install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key --forge -y
 
 Use: server-tool help install <package>
 EOF
@@ -1658,16 +1664,29 @@ Existing applications are picked up during install. Later create-app,
 domain, SSL, rename and delete commands update the HTTP checks.
 update-probes also rewrites the Alloy config.
 
+On a Laravel Forge server, add --forge. Ubuntu 22.04 and 24.04 can run
+this install and update-probes. Other commands stay on Debian 12 and 13.
+Forge Laravel logs are read from /home/<user>/<site>/storage/logs, which
+is also the shared storage of a zero-downtime deploy. Nginx error logs
+and access counts come from /var/log/nginx/<domain>-error.log and
+<domain>-access.log. The domain is taken from the file name, so Forge
+nginx site files are left unchanged. An nginx line is labeled username
+forge when the path does not include a Linux user. Backup logs are not
+collected. A daily cron refreshes log access and HTTP probes after sites
+are added. update-probes does the same and keeps the Forge layout.
+
 Usage:
-  server-tool install alloy --url <https://host> --api-key-file <file> [-y]
+  server-tool install alloy --url <https://host> --api-key-file <file> [--forge] [-y]
 
 Options:
   --url URL                  Grafana site, for example https://grafana.example.com
   --api-key-file FILE        File that contains the monitoring API key
+  --forge                    Laravel Forge paths (Ubuntu 22.04, 24.04, or Debian)
   -y, --yes                  Skip confirmation prompts
 
 Examples:
   server-tool install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key -y
+  server-tool install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key --forge -y
 EOF
       ;;
     monitoring)

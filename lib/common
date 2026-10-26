@@ -25,6 +25,120 @@ require_supported_debian() {
   esac
 }
 
+# Debian 12/13 can run every command. Ubuntu 22.04/24.04 can only install
+# Forge Alloy logging, and refresh it after that install.
+host_is_supported() {
+  local id="$1"
+  local codename="$2"
+  shift 2
+
+  case "$id" in
+    debian)
+      case "$codename" in
+        bookworm|trixie) return 0 ;;
+      esac
+      return 1
+      ;;
+    ubuntu)
+      case "$codename" in
+        jammy|noble) ;;
+        *) return 1 ;;
+      esac
+      ubuntu_forge_command_allowed "$@"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+ubuntu_forge_command_allowed() {
+  local cmd="${1:-}"
+  shift || true
+
+  case "$cmd" in
+    update-probes)
+      [ "$(alloy_layout)" = "forge" ]
+      ;;
+    install)
+      ubuntu_forge_install_allowed "$@"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+ubuntu_forge_install_allowed() {
+  local prev="" arg
+  local has_alloy=0 has_forge=0 packages=0
+
+  for arg in "$@"; do
+    case "$prev" in
+      --url|--api-key-file)
+        prev=""
+        continue
+        ;;
+    esac
+    case "$arg" in
+      --url|--api-key-file)
+        prev="$arg"
+        ;;
+      --forge)
+        has_forge=1
+        ;;
+      -*)
+        return 1
+        ;;
+      *)
+        packages=$((packages + 1))
+        if [ "$arg" = "alloy" ]; then
+          has_alloy=1
+        fi
+        ;;
+    esac
+  done
+
+  [ "$has_alloy" -eq 1 ] && [ "$has_forge" -eq 1 ] && [ "$packages" -eq 1 ]
+}
+
+require_supported_host() {
+  local id codename
+
+  if [ ! -f /etc/os-release ]; then
+    echo "Error: cannot determine OS. This tool requires Debian 12 (bookworm) or Debian 13 (trixie)."
+    exit 1
+  fi
+
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  id="${ID:-}"
+  codename="${VERSION_CODENAME:-}"
+
+  if [ "$id" = "debian" ]; then
+    require_supported_debian
+    return
+  fi
+
+  if host_is_supported "$id" "$codename" "$@"; then
+    return 0
+  fi
+
+  if [ "$id" = "ubuntu" ]; then
+    echo "Error: Ubuntu ${codename:-unknown} cannot run this command."
+    echo "Only Laravel Forge logging is supported, on Ubuntu 22.04 (jammy) and 24.04 (noble):"
+    echo "  server-tool install alloy --url <https://host> --api-key-file <file> --forge"
+    if [ "${1:-}" = "update-probes" ] && [ "$(alloy_layout)" != "forge" ]; then
+      echo "update-probes on Ubuntu requires that Forge install first."
+    fi
+    exit 1
+  fi
+
+  echo "Error: this tool only supports Debian. Detected: ${id:-unknown}."
+  echo "Laravel Forge logging is supported on Ubuntu 22.04 (jammy) and 24.04 (noble)."
+  exit 1
+}
+
 debian_codename() {
   # shellcheck disable=SC1091
   . /etc/os-release
@@ -2947,72 +3061,148 @@ install_grafana_dashboards() {
   install -m 644 -o root -g grafana "$src/alerting/backup-failed.yaml" /etc/grafana/provisioning/alerting/backup-failed.yaml
 }
 
-install_alloy_config() {
+alloy_layout_file() {
+  printf '%s\n' /etc/server-tool/alloy-layout
+}
+
+alloy_layout() {
+  local file layout
+
+  file="$(alloy_layout_file)"
+  if [ ! -f "$file" ]; then
+    printf '%s\n' server-tool
+    return 0
+  fi
+
+  layout="$(tr -d '[:space:]' < "$file")"
+  case "$layout" in
+    forge|server-tool)
+      printf '%s\n' "$layout"
+      ;;
+    *)
+      printf '%s\n' server-tool
+      ;;
+  esac
+}
+
+write_alloy_layout() {
+  local layout="$1"
+  local file
+
+  case "$layout" in
+    forge|server-tool)
+      ;;
+    *)
+      echo "Error: unknown Alloy layout '$layout'."
+      exit 1
+      ;;
+  esac
+
+  file="$(alloy_layout_file)"
+  install -d -m 755 /etc/server-tool
+  printf '%s\n' "$layout" > "$file"
+  chmod 644 "$file"
+}
+
+alloy_config_template() {
+  case "$1" in
+    server-tool)
+      printf '%s\n' "$SERVER_TOOL_ROOT/templates/alloy/config.alloy"
+      ;;
+    forge)
+      printf '%s\n' "$SERVER_TOOL_ROOT/templates/alloy/config-forge.alloy"
+      ;;
+    *)
+      echo "Error: unknown Alloy layout '$1'." >&2
+      return 1
+      ;;
+  esac
+}
+
+render_alloy_config() {
   local url="$1"
   local api_key="$2"
   local server_name="$3"
-  local tmp
+  local layout="$4"
+  local dest="$5"
+  local template
 
-  tmp="$(mktemp)"
+  template="$(alloy_config_template "$layout")"
   sed \
     -e "s|__MONITORING_URL__|${url}|g" \
     -e "s|__API_KEY__|${api_key}|g" \
     -e "s|__SERVER_NAME__|${server_name}|g" \
-    "$SERVER_TOOL_ROOT/templates/alloy/config.alloy" > "$tmp"
+    "$template" > "$dest"
 
   if alloy validate --help >/dev/null 2>&1; then
-    alloy validate "$tmp"
+    alloy validate "$dest"
   else
-    alloy fmt "$tmp" >/dev/null
+    alloy fmt "$dest" >/dev/null
   fi
+}
+
+publish_alloy_config() {
+  local src="$1"
 
   install -d -m 755 /etc/alloy
-  install -m 640 -o root -g alloy "$tmp" /etc/alloy/config.alloy
+  install -m 640 -o root -g alloy "$src" /etc/alloy/config.alloy
+}
+
+install_alloy_config() {
+  local url="$1"
+  local api_key="$2"
+  local server_name="$3"
+  local layout="${4:-server-tool}"
+  local tmp
+
+  tmp="$(mktemp)"
+  render_alloy_config "$url" "$api_key" "$server_name" "$layout" "$tmp"
+  publish_alloy_config "$tmp"
   rm -f "$tmp"
 
-  install -d -m 755 /var/log/server-tool
-  if [ ! -f /var/log/server-tool/backup.log ]; then
-    touch /var/log/server-tool/backup.log
+  if [ "$layout" = "server-tool" ]; then
+    install -d -m 755 /var/log/server-tool
+    if [ ! -f /var/log/server-tool/backup.log ]; then
+      touch /var/log/server-tool/backup.log
+    fi
+    chmod 644 /var/log/server-tool/backup.log
   fi
-  chmod 644 /var/log/server-tool/backup.log
+}
+
+forge_monitoring_cron_file() {
+  printf '%s\n' /etc/cron.d/server-tool-forge-monitoring
+}
+
+install_forge_monitoring_cron() {
+  local file
+
+  file="$(forge_monitoring_cron_file)"
+  cat > "$file" <<'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Refresh Forge log ACLs and HTTP probes. Alloy restarts only when its config changes.
+17 4 * * * root server-tool update-probes -y >>/var/log/server-tool-forge-monitoring.log 2>&1 || echo "Forge monitoring refresh failed; see /var/log/server-tool-forge-monitoring.log" >&2
+EOF
+  chmod 644 "$file"
+}
+
+remove_forge_monitoring_cron() {
+  rm -f "$(forge_monitoring_cron_file)"
 }
 
 monitoring_blackbox_targets_file() {
   printf '%s\n' /var/lib/server-tool/monitoring/blackbox-targets.json
 }
 
-write_monitoring_blackbox_targets() {
-  local file tmp dir username app_name conf names domain scheme url probe_name server
-  local entries=() entry index=0
+monitoring_blackbox_entry() {
+  local url="$1"
+  local probe_name="$2"
+  local username="$3"
+  local app_name="$4"
+  local domain="$5"
+  local server="$6"
 
-  file="$(monitoring_blackbox_targets_file)"
-  dir="$(dirname "$file")"
-  tmp="$(mktemp)"
-  server="$(hostname -s)"
-  install -d -m 755 /var/lib/server-tool "$dir"
-  chmod 755 /var/lib/server-tool "$dir"
-
-  while read -r username app_name; do
-    [ -n "$username" ] || continue
-    [ -n "$app_name" ] || continue
-    conf="/home/${username}/${app_name}/nginx/${app_name}.conf"
-    [ -f "$conf" ] || continue
-    names="$(app_server_names_from_nginx "$conf")"
-    scheme="http"
-    if grep -qE '^[[:space:]]*listen[[:space:]]+[^;]*443' "$conf"; then
-      scheme="https"
-    fi
-    for domain in $names; do
-      case "$domain" in
-        *.*)
-          ;;
-        *)
-          continue
-          ;;
-      esac
-      url="${scheme}://${domain}"
-      probe_name="${username}_${app_name}_${domain}"
-      entries+=("$(cat <<EOF
+  cat <<EOF
   {
     "targets": ["$(monitoring_json_escape "$url")"],
     "labels": {
@@ -3026,26 +3216,83 @@ write_monitoring_blackbox_targets() {
     }
   }
 EOF
-)")
-    done
-  done < <(list_server_tool_apps || true)
+}
+
+monitoring_write_blackbox_file() {
+  local file tmp dir entry index=0
+
+  file="$(monitoring_blackbox_targets_file)"
+  dir="$(dirname "$file")"
+  tmp="$(mktemp)"
+  install -d -m 755 /var/lib/server-tool "$dir"
+  chmod 755 /var/lib/server-tool "$dir"
 
   {
     echo '['
-    if [ ${#entries[@]} -gt 0 ]; then
-      for entry in "${entries[@]}"; do
-        if [ "$index" -gt 0 ]; then
-          echo ','
-        fi
-        printf '%s' "$entry"
-        index=$((index + 1))
-      done
+    for entry in "$@"; do
+      if [ "$index" -gt 0 ]; then
+        echo ','
+      fi
+      printf '%s' "$entry"
+      index=$((index + 1))
+    done
+    if [ "$#" -gt 0 ]; then
       echo
     fi
     echo ']'
   } > "$tmp"
   mv "$tmp" "$file"
   chmod 644 "$file"
+}
+
+monitoring_listen_scheme() {
+  local conf="$1"
+
+  if grep -qE '^[[:space:]]*listen[[:space:]]+[^;]*443' "$conf"; then
+    printf '%s\n' https
+  else
+    printf '%s\n' http
+  fi
+}
+
+write_monitoring_blackbox_targets() {
+  local username app_name conf names domain scheme url probe_name server
+  local entries=()
+
+  server="$(hostname -s)"
+
+  while read -r username app_name; do
+    [ -n "$username" ] || continue
+    [ -n "$app_name" ] || continue
+    conf="/home/${username}/${app_name}/nginx/${app_name}.conf"
+    [ -f "$conf" ] || continue
+    names="$(app_server_names_from_nginx "$conf")"
+    scheme="$(monitoring_listen_scheme "$conf")"
+    for domain in $names; do
+      case "$domain" in
+        *.*)
+          ;;
+        *)
+          continue
+          ;;
+      esac
+      url="${scheme}://${domain}"
+      probe_name="${username}_${app_name}_${domain}"
+      entries+=("$(monitoring_blackbox_entry "$url" "$probe_name" "$username" "$app_name" "$domain" "$server")")
+    done
+  done < <(list_server_tool_apps || true)
+
+  if [ ${#entries[@]} -eq 0 ]; then
+    monitoring_write_blackbox_file
+  else
+    monitoring_write_blackbox_file "${entries[@]}"
+  fi
+}
+
+ensure_acl() {
+  if ! command -v setfacl >/dev/null 2>&1; then
+    apt-get -y install acl
+  fi
 }
 
 grant_alloy_ancestors() {
@@ -3088,9 +3335,7 @@ grant_alloy_log_access() {
     return 0
   fi
 
-  if ! command -v setfacl >/dev/null 2>&1; then
-    apt-get -y install acl
-  fi
+  ensure_acl
 
   # r-x, not only traverse: the log globs must list /home/<user> and the app directory.
   setfacl -m "u:${alloy_user}:r-x" "/home/${username}"
@@ -3136,6 +3381,150 @@ sync_all_app_monitoring() {
     grant_alloy_log_access "$username" "$app_name"
   done < <(list_server_tool_apps || true)
   write_monitoring_blackbox_targets
+}
+
+forge_monitoring_skip_user() {
+  case "$1" in
+    ""|*/*|.*|root|admin|www-data|nginx|nobody|daemon|ubuntu|alloy|lost+found)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+grant_forge_home_acl() {
+  local alloy_user="$1"
+  local home="$2"
+
+  [ -d "$home" ] || return 0
+  setfacl -m "u:${alloy_user}:r-x" "$home"
+  setfacl -m "d:u:${alloy_user}:r-x" "$home"
+}
+
+grant_forge_log_access() {
+  local alloy_user="alloy"
+  local user_home username site_dir site found
+
+  if ! id "$alloy_user" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  ensure_acl
+  if [ -d /home/forge ]; then
+    grant_forge_home_acl "$alloy_user" /home/forge
+  fi
+  if [ ! -d /home ]; then
+    return 0
+  fi
+
+  for user_home in /home/*; do
+    [ -d "$user_home" ] || continue
+    username="$(basename "$user_home")"
+    if forge_monitoring_skip_user "$username"; then
+      continue
+    fi
+
+    found=0
+    for site_dir in "$user_home"/*; do
+      [ -d "$site_dir" ] || continue
+      site="$(basename "$site_dir")"
+      case "$site" in
+        ""|*/*|.*)
+          continue
+          ;;
+      esac
+      if [ ! -d "$site_dir/storage/logs" ]; then
+        continue
+      fi
+      if [ "$found" -eq 0 ]; then
+        grant_forge_home_acl "$alloy_user" "$user_home"
+        found=1
+      fi
+      setfacl -m "u:${alloy_user}:r-x" "$site_dir"
+      grant_alloy_log_dir "$alloy_user" "$site_dir/storage/logs"
+    done
+  done
+}
+
+# First "root /home/<user>/<site>/..." in a Forge nginx file.
+forge_nginx_site_owner() {
+  local conf="$1"
+
+  awk '
+    $1 == "root" && $2 ~ "^/home/[^/]+/[^/]+/" {
+      path = $2
+      sub(/;.*$/, "", path)
+      n = split(path, parts, "/")
+      if (n >= 4 && parts[2] == "home" && parts[3] != "" && parts[4] != "") {
+        print parts[3], parts[4]
+        exit
+      }
+    }
+  ' "$conf"
+}
+
+write_forge_blackbox_targets() {
+  local conf base owner username app_name names domain scheme url probe_name server
+  local entries=() seen_urls=" "
+
+  server="$(hostname -s)"
+  if [ -d /etc/nginx/sites-enabled ]; then
+    for conf in /etc/nginx/sites-enabled/*; do
+      [ -f "$conf" ] || continue
+      base="$(basename "$conf")"
+      case "$base" in
+        *~|*.dpkg-old|*.dpkg-dist|*.dpkg-bak|*.bak)
+          continue
+          ;;
+      esac
+
+      owner="$(forge_nginx_site_owner "$conf")"
+      case "$owner" in
+        *" "*) ;;
+        *) continue ;;
+      esac
+      username="${owner%% *}"
+      app_name="${owner#* }"
+      [ -n "$username" ] && [ -n "$app_name" ] || continue
+      names="$(app_server_names_from_nginx "$conf")"
+      scheme="$(monitoring_listen_scheme "$conf")"
+      for domain in $names; do
+        case "$domain" in
+          *.*)
+            ;;
+          *)
+            continue
+            ;;
+        esac
+        url="${scheme}://${domain}"
+        case "$seen_urls" in
+          *" ${url} "*)
+            continue
+            ;;
+        esac
+        seen_urls="${seen_urls}${url} "
+        probe_name="${username}_${app_name}_${domain}"
+        entries+=("$(monitoring_blackbox_entry "$url" "$probe_name" "$username" "$app_name" "$domain" "$server")")
+      done
+    done
+  fi
+
+  if [ ${#entries[@]} -eq 0 ]; then
+    monitoring_write_blackbox_file
+  else
+    monitoring_write_blackbox_file "${entries[@]}"
+  fi
+}
+
+sync_forge_monitoring() {
+  if ! command -v alloy >/dev/null 2>&1; then
+    return 0
+  fi
+
+  grant_forge_log_access
+  write_forge_blackbox_targets
 }
 
 list_certbot_deploy_hooks() {

@@ -1,0 +1,266 @@
+prometheus.exporter.unix "node" {
+  enable_collectors = ["systemd"]
+
+  systemd {
+    enable_restarts = false
+    start_time      = false
+    task_metrics    = false
+  }
+}
+
+prometheus.scrape "node" {
+  targets         = prometheus.exporter.unix.node.targets
+  forward_to      = [prometheus.remote_write.metrics.receiver]
+  scrape_interval = "30s"
+  job_name        = "node"
+}
+
+discovery.file "http_checks" {
+  files            = ["/var/lib/server-tool/monitoring/blackbox-targets.json"]
+  refresh_interval = "30s"
+}
+
+prometheus.exporter.blackbox "http" {
+  config = `
+    modules:
+      http_2xx:
+        prober: http
+        timeout: 10s
+        http:
+          preferred_ip_protocol: ip4
+          ip_protocol_fallback: true
+          follow_redirects: true
+          valid_status_codes: [200, 201, 202, 204, 301, 302, 303, 307, 308, 401, 403, 404]
+  `
+  targets = discovery.file.http_checks.targets
+}
+
+discovery.relabel "http_checks" {
+  targets = prometheus.exporter.blackbox.http.targets
+
+  rule {
+    source_labels = ["__param_target"]
+    target_label  = "instance"
+  }
+}
+
+prometheus.scrape "http_checks" {
+  targets         = discovery.relabel.http_checks.output
+  forward_to      = [prometheus.remote_write.metrics.receiver]
+  scrape_interval = "30s"
+  job_name        = "http_checks"
+}
+
+prometheus.remote_write "metrics" {
+  endpoint {
+    url = "__MONITORING_URL__/api/v1/write"
+
+    headers = {
+      "X-Api-Key" = "__API_KEY__",
+    }
+  }
+
+  external_labels = {
+    server = "__SERVER_NAME__",
+  }
+}
+
+loki.write "logs" {
+  endpoint {
+    url = "__MONITORING_URL__/loki/api/v1/push"
+
+    headers = {
+      "X-Api-Key" = "__API_KEY__",
+    }
+  }
+
+  external_labels = {
+    server = "__SERVER_NAME__",
+  }
+}
+
+loki.source.journal "system" {
+  labels = {
+    logtype = "journal",
+  }
+  forward_to = [loki.write.logs.receiver]
+}
+
+loki.process "laravel_logs" {
+  // Grafana's recommended first line for bracketed timestamps, which is how
+  // Laravel starts each entry: [2026-10-06 08:00:59] staging.ERROR: ...
+  stage.multiline {
+    firstline     = `^\[\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}:\d{2}\]`
+    max_wait_time = "3s"
+    max_lines     = 1000
+  }
+
+  forward_to = [loki.process.app_logs.receiver]
+}
+
+loki.process "app_logs" {
+  stage.regex {
+    source     = "filename"
+    expression = `^/home/(?P<username>[^/]+)/(?P<application>[^/]+)/`
+  }
+
+  stage.regex {
+    source     = "filename"
+    expression = `^.*/(?P<logfile>[^/]+)$`
+  }
+
+  stage.regex {
+    expression = `^\[[^\]]+\] \S+\.(?P<level>DEBUG|INFO|NOTICE|WARNING|ERROR|CRITICAL|ALERT|EMERGENCY):`
+  }
+
+  stage.template {
+    source   = "level"
+    template = `{{ if .level }}{{ .level }}{{ else }}-{{ end }}`
+  }
+
+  stage.labels {
+    values = {
+      username    = "",
+      application = "",
+      logfile     = "",
+      level       = "",
+    }
+  }
+
+  forward_to = [loki.write.logs.receiver]
+}
+
+// Forge keeps Laravel logs in the site storage directory, including the
+// shared storage of a zero-downtime deploy. The current symlink and release
+// directories are not followed, so one file is not shipped twice.
+loki.source.file "laravel_logs" {
+  targets = [
+    { __path__ = "/home/*/*/storage/logs/*.log", logtype = "laravel" },
+  ]
+  forward_to = [loki.process.laravel_logs.receiver]
+
+  file_match {
+    enabled     = true
+    sync_period = "10s"
+  }
+}
+
+// Nginx logs use Forge's file names. The domain is the file name, so the
+// site config can stay under Forge's control. username is forge when the
+// path does not name a Linux user; the logs dashboard requires that label.
+loki.process "nginx_error_logs" {
+  stage.regex {
+    source     = "filename"
+    expression = `/var/log/nginx/(?P<application>[^/]+)-error\.log$`
+  }
+
+  stage.regex {
+    source     = "filename"
+    expression = `^.*/(?P<logfile>[^/]+)$`
+  }
+
+  stage.regex {
+    expression = `^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2} \[(?P<nginx_level>emerg|alert|crit|error|warn|notice|info|debug)\]`
+  }
+
+  stage.template {
+    source   = "level"
+    template = `{{ if eq .nginx_level "warn" }}WARNING{{ else if eq .nginx_level "error" }}ERROR{{ else if eq .nginx_level "crit" }}CRITICAL{{ else if eq .nginx_level "emerg" }}EMERGENCY{{ else if eq .nginx_level "alert" }}ALERT{{ else if eq .nginx_level "debug" }}DEBUG{{ else if eq .nginx_level "info" }}INFO{{ else if eq .nginx_level "notice" }}NOTICE{{ else }}-{{ end }}`
+  }
+
+  stage.template {
+    source   = "username"
+    template = `{{ if .username }}{{ .username }}{{ else }}forge{{ end }}`
+  }
+
+  stage.labels {
+    values = {
+      username    = "",
+      application = "",
+      logfile     = "",
+      level       = "",
+    }
+  }
+
+  forward_to = [loki.write.logs.receiver]
+}
+
+loki.source.file "nginx_error_logs" {
+  targets = [
+    { __path__ = "/var/log/nginx/*-error.log", logtype = "server" },
+  ]
+  forward_to = [loki.process.nginx_error_logs.receiver]
+
+  file_match {
+    enabled     = true
+    sync_period = "10s"
+  }
+}
+
+loki.process "access_requests" {
+  forward_to = []
+
+  stage.regex {
+    source     = "filename"
+    expression = `/var/log/nginx/(?P<domain>[^/]+)-access\.log$`
+  }
+
+  stage.template {
+    source   = "application"
+    template = `{{ if .domain }}{{ .domain }}{{ else }}-{{ end }}`
+  }
+
+  stage.labels {
+    values = {
+      application = "",
+      domain      = "",
+    }
+  }
+
+  stage.match {
+    selector = `{domain=~".+"}`
+
+    stage.metrics {
+      metric.counter {
+        name        = "nginx_requests_total"
+        description = "Incoming requests recorded in nginx access logs"
+        prefix      = "loki_process_custom_"
+        action      = "inc"
+        match_all   = true
+        max_idle_duration = "24h"
+      }
+    }
+  }
+}
+
+loki.source.file "access_logs" {
+  targets = [
+    { __path__ = "/var/log/nginx/*-access.log" },
+  ]
+  forward_to = [loki.process.access_requests.receiver]
+
+  file_match {
+    enabled     = true
+    sync_period = "10s"
+  }
+}
+
+prometheus.relabel "access_requests" {
+  forward_to = [prometheus.remote_write.metrics.receiver]
+
+  rule {
+    source_labels = ["__name__"]
+    regex         = "loki_process_custom_nginx_requests_total"
+    action        = "keep"
+  }
+}
+
+prometheus.scrape "access_requests" {
+  targets = [{
+    "__address__" = "127.0.0.1:12345",
+  }]
+
+  forward_to      = [prometheus.relabel.access_requests.receiver]
+  scrape_interval = "30s"
+  job_name        = "nginx_requests"
+}

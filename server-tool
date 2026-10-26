@@ -36,7 +36,7 @@ if [ "$EUID" -ne 0 ]
   exit
 fi
 
-require_supported_debian
+require_supported_host "$@"
 
 # Extract the script name from the arguments
 script_name=$1-cmd
