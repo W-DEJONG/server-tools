@@ -1701,8 +1701,9 @@ Grafana is served at https://<domain>/. Prometheus remote write is
 /api/v1/write and Loki push is /loki/api/v1/push. Both ingest locations
 require the X-Api-Key header. Grafana reads Prometheus and Loki on
 localhost. A generated API key and Grafana admin password are stored in
-/etc/server-tool/monitoring.conf. Repeating the install keeps that key
-and password.
+/etc/server-tool/monitoring.conf. Prometheus keeps metrics for 30 days.
+Repeating the install keeps that key and password, applies the retention,
+and restarts Prometheus.
 
 Certbot creates the certificate. The Server tools folder in Grafana
 contains the server, HTTP check, application log and backup dashboards,

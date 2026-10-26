@@ -419,6 +419,7 @@ grep -q '{{ $labels.username }}' /etc/grafana/provisioning/alerting/backup-faile
 grep -q '{{ $labels.application }}' /etc/grafana/provisioning/alerting/backup-failed.yaml
 grep -q 'GF_AUTH_ANONYMOUS_ENABLED=false' /etc/systemd/system/grafana-server.service.d/server-tool.conf
 grep -q 'GF_SERVER_ROOT_URL=https://monitor.example.test/' /etc/systemd/system/grafana-server.service.d/server-tool.conf
+grep -q -- '--storage.tsdb.retention.time=30d' /etc/systemd/system/prometheus.service.d/server-tool.conf
 systemctl is-active --quiet prometheus
 systemctl is-active --quiet loki
 systemctl is-active --quiet grafana-server
