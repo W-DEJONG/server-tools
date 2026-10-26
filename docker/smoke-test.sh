@@ -1354,6 +1354,9 @@ echo 'APP_KEY=secret' > /home/testdev/demo/current/.env
 echo 'cert' > /home/testdev/demo/nginx/certs/app.pem
 echo 'cache' > /home/testdev/demo/current/storage/framework/cache
 echo 'applog' > /home/testdev/demo/current/storage/logs/laravel.log
+mkdir -p /home/testdev/demo/shared/storage/app /home/testdev/demo/current/public
+echo keep > /home/testdev/demo/shared/storage/app/keep.txt
+ln -s ../../shared/storage /home/testdev/demo/current/public/storage
 chown -R testdev:testdev /home/testdev/demo/log /home/testdev/demo/releases /home/testdev/demo/install /home/testdev/demo/nginx
 server-tool backup-app testdev demo -y
 weekday="$(LC_ALL=C date +%A | tr '[:upper:]' '[:lower:]')"
@@ -1363,6 +1366,11 @@ test -s "$backup_zip"
 unzip -t "$backup_zip" >/dev/null
 zip_list="$(unzip -Z1 "$backup_zip")"
 grep -q 'current/public/index.php' <<< "$zip_list"
+grep -qxF 'shared/storage/app/keep.txt' <<< "$zip_list"
+grep -qxF 'current/public/storage' <<< "$zip_list"
+! grep -q 'current/public/storage/' <<< "$zip_list"
+test "$(unzip -p "$backup_zip" current/public/storage)" = "../../shared/storage"
+unzip -Z "$backup_zip" current/public/storage | grep -q '^l'
 grep -q '^db/demo-.*\.dump$' <<< "$zip_list"
 ! grep -q '^\.env.db$' <<< "$zip_list"
 ! grep -q '\.env$' <<< "$zip_list"

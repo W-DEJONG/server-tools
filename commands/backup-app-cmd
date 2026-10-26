@@ -185,15 +185,204 @@ zip_excludes=(
   -x "*/storage/app/private/livewire-tmp/*"
   -x "*/storage/app/private/livewire-tmp/"
 )
+backup_current_rel=""
+backup_skip_install=0
 if [ -L "$APP_ROOT/current" ]; then
   current_target="$(readlink "$APP_ROOT/current")"
   current_target="${current_target%/}"
+  current_phys="$(readlink -f "$APP_ROOT/current" 2>/dev/null || true)"
+  case "$current_phys" in
+    "$APP_ROOT"/*) backup_current_rel="${current_phys#"$APP_ROOT"/}" ;;
+  esac
   case "$current_target" in
     install|./install)
+      backup_skip_install=1
       zip_excludes+=(-x "install/*" -x "install/")
       ;;
   esac
 fi
+
+# A symlink whose target is already inside the application would be stored
+# twice, because zip follows links. current itself stays followed so the
+# active release is archived as current/. Other internal links are stored
+# as links, relative to that archive path rather than releases/<id>/.
+backup_symlink_is_skipped() {
+  local rel="$1"
+  case "$rel" in
+    current|log|log/*|releases|releases/*)
+      return 0
+      ;;
+    .env|*/.env|.env.db|*/.env.db)
+      return 0
+      ;;
+    node_modules|node_modules/*|*/node_modules|*/node_modules/*)
+      return 0
+      ;;
+    .git|.git/*|*/.git|*/.git/*)
+      return 0
+      ;;
+    nginx/certs|nginx/certs/*|*/nginx/certs|*/nginx/certs/*)
+      return 0
+      ;;
+    nginx/ssl|nginx/ssl/*|*/nginx/ssl|*/nginx/ssl/*)
+      return 0
+      ;;
+    storage/framework|storage/framework/*|*/storage/framework|*/storage/framework/*)
+      return 0
+      ;;
+    storage/logs|storage/logs/*|*/storage/logs|*/storage/logs/*)
+      return 0
+      ;;
+    storage/app/private/livewire-tmp|storage/app/private/livewire-tmp/*|*/storage/app/private/livewire-tmp|*/storage/app/private/livewire-tmp/*)
+      return 0
+      ;;
+  esac
+  if [ "$backup_skip_install" -eq 1 ]; then
+    case "$rel" in
+      install|install/*) return 0 ;;
+    esac
+  fi
+  return 1
+}
+
+backup_list_symlinks() {
+  find "$APP_ROOT" \
+    \( -path "$APP_ROOT/log" -o -path "$APP_ROOT/releases" -o -name node_modules -o -name .git \
+       -o -path "$APP_ROOT/nginx/certs" -o -path "$APP_ROOT/nginx/ssl" \
+       -o -path '*/storage/framework' -o -path '*/storage/logs' \
+       -o -path '*/storage/app/private/livewire-tmp' \) -prune \
+    -o -type l -print
+  if [ -e "$APP_ROOT/current" ]; then
+    find -H "$APP_ROOT/current" \
+      \( -name node_modules -o -name .git \
+         -o -path '*/nginx/certs' -o -path '*/nginx/ssl' \
+         -o -path '*/storage/framework' -o -path '*/storage/logs' \
+         -o -path '*/storage/app/private/livewire-tmp' \) -prune \
+      -o -type l -print
+  fi
+}
+
+backup_archive_target() {
+  local target_rel="$1"
+  if [ -n "$backup_current_rel" ] && [ "$backup_current_rel" != "current" ]; then
+    case "$target_rel" in
+      "$backup_current_rel"|"$backup_current_rel"/*)
+        target_rel="current${target_rel#"$backup_current_rel"}"
+        ;;
+    esac
+  fi
+  printf '%s\n' "$target_rel"
+}
+
+backup_relative_link() {
+  local from="$1"
+  local to="$2"
+  local prefix rel="" rest
+
+  [ "$from" = "." ] && from=""
+  while [ -n "$from" ] && [ -n "$to" ]; do
+    prefix="${from%%/*}"
+    if [ "$prefix" != "${to%%/*}" ]; then
+      break
+    fi
+    if [ "$from" = "$prefix" ]; then
+      from=""
+    else
+      from="${from#*/}"
+    fi
+    if [ "$to" = "$prefix" ]; then
+      to=""
+    else
+      to="${to#*/}"
+    fi
+  done
+
+  rest="$from"
+  while [ -n "$rest" ]; do
+    rel="${rel}../"
+    if [ "$rest" = "${rest%%/*}" ]; then
+      rest=""
+    else
+      rest="${rest#*/}"
+    fi
+  done
+
+  if [ -z "$to" ]; then
+    rel="${rel%/}"
+    [ -n "$rel" ] || rel="."
+    printf '%s\n' "$rel"
+    return
+  fi
+  printf '%s%s\n' "$rel" "$to"
+}
+
+backup_collect_internal_symlinks() {
+  local path rel target seen duplicate
+  backup_internal_symlinks=()
+
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    rel="${path#"$APP_ROOT"/}"
+    if [ "$rel" = "$path" ] || backup_symlink_is_skipped "$rel"; then
+      continue
+    fi
+    if [ ! -L "$path" ]; then
+      continue
+    fi
+    target="$(readlink -f "$path" 2>/dev/null || true)"
+    case "$target" in
+      "$APP_ROOT"|"$APP_ROOT"/*) ;;
+      *) continue ;;
+    esac
+
+    duplicate=0
+    if [ "${#backup_internal_symlinks[@]}" -gt 0 ]; then
+      for seen in "${backup_internal_symlinks[@]}"; do
+        if [ "$seen" = "$rel" ]; then
+          duplicate=1
+          break
+        fi
+      done
+    fi
+    if [ "$duplicate" -eq 1 ]; then
+      continue
+    fi
+
+    backup_internal_symlinks+=("$rel")
+    zip_excludes+=(-x "$rel" -x "$rel/*")
+  done < <(backup_list_symlinks)
+}
+
+backup_store_internal_symlinks() {
+  local rel target target_rel archive_target from_dir relative link_root
+
+  if [ "${#backup_internal_symlinks[@]}" -eq 0 ]; then
+    return 0
+  fi
+
+  link_root="$workdir/symlinks"
+  rm -rf "$link_root"
+  for rel in "${backup_internal_symlinks[@]}"; do
+    target="$(readlink -f "$APP_ROOT/$rel")"
+    if [ "$target" = "$APP_ROOT" ]; then
+      target_rel="."
+    else
+      target_rel="${target#"$APP_ROOT"/}"
+    fi
+    archive_target="$(backup_archive_target "$target_rel")"
+    from_dir="$(dirname "$rel")"
+    relative="$(backup_relative_link "$from_dir" "$archive_target")"
+    mkdir -p "$link_root/$(dirname "$rel")"
+    ln -s "$relative" "$link_root/$rel"
+  done
+
+  (
+    cd "$link_root"
+    zip -y "$zip_file" "${backup_internal_symlinks[@]}"
+  )
+}
+
+backup_collect_internal_symlinks
 
 echo "Creating archive..."
 (
@@ -204,6 +393,8 @@ echo "Creating archive..."
 if [ -d "$workdir/db" ]; then
   (cd "$workdir" && zip -r "$zip_file" db)
 fi
+
+backup_store_internal_symlinks
 
 echo "Uploading archive to $s3_uri"
 aws_s3_upload "$zip_file" "$s3_uri"

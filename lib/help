@@ -254,6 +254,10 @@ their retention period ends.
 The archive and database dump are built in /var/tmp and removed after the
 upload.
 
+A symlink that points inside the application is stored as a link. Its
+files stay once, at their real path. current itself is still followed, so
+the active release is archived as current/.
+
 Usage:
   server-tool backup-app <username> <application> [--enable|--disable] [-y]
 
