@@ -43,6 +43,8 @@ max_execution_time = 0
 max_input_time = -1
 EOF
 
+    ensure_php_upload_progress_ini "$version"
+
     php-fpm${version} -tt
     systemctl restart "php${version}-fpm"
 done

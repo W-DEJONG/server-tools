@@ -1364,6 +1364,149 @@ php_fpm_is_installed() {
   command -v "php-fpm${version}" >/dev/null 2>&1 && [ -d "/etc/php/${version}/fpm/pool.d" ]
 }
 
+php_upload_progress_ini_file() {
+  local version="$1"
+  printf '%s\n' "/etc/php/${version}/fpm/conf.d/99-server-tool-upload-progress.ini"
+}
+
+php_upload_progress_ini_contents() {
+  cat <<'EOF'
+; CVE-2026-115560: disable session upload progress until the next PHP bugfix release.
+session.upload_progress.enabled = 0
+EOF
+}
+
+php_upload_progress_ini_is_current() {
+  local version="$1"
+  local file expected actual
+  file="$(php_upload_progress_ini_file "$version")"
+  [ -f "$file" ] || return 1
+  expected="$(php_upload_progress_ini_contents)"
+  actual="$(cat "$file")"
+  [ "$actual" = "$expected" ]
+}
+
+ensure_php_upload_progress_ini() {
+  local version="$1"
+  local file
+  file="$(php_upload_progress_ini_file "$version")"
+  if php_upload_progress_ini_is_current "$version"; then
+    return 0
+  fi
+  php_upload_progress_ini_contents > "$file"
+}
+
+php_upload_progress_is_disabled() {
+  case "$1" in
+    0|Off|off|false|False|no|No) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# php-fpm -i prints: session.upload_progress.enabled => Off => Off
+# The first value is the local value.
+php_fpm_upload_progress_state() {
+  local version="$1"
+  local info line value
+  info="$("php-fpm${version}" -i)"
+  line="$(printf '%s\n' "$info" | grep -m 1 -E '^session\.upload_progress\.enabled[[:space:]]*=>' || true)"
+  value="$(printf '%s\n' "$line" | sed -nE 's/^session\.upload_progress\.enabled[[:space:]]*=>[[:space:]]*([^[:space:]]+).*/\1/p')"
+  if [ -z "$value" ]; then
+    echo "Error: could not read session.upload_progress.enabled for PHP ${version} FPM." >&2
+    return 1
+  fi
+  printf '%s\n' "$value"
+}
+
+php_fpm_upload_progress_enabling_pools() {
+  local nullglob_was=0 conf pattern
+  pattern='^[[:space:]]*php_(admin_)?value[[:space:]]*\[session\.upload_progress\.enabled\][[:space:]]*=[[:space:]]*(1|[Oo][Nn]|[Tt][Rr][Uu][Ee]|[Yy][Ee][Ss])[[:space:]]*($|;)'
+  shopt -q nullglob && nullglob_was=1
+  shopt -s nullglob
+  for conf in /etc/php/*/fpm/pool.d/* /home/*/*/php-fpm/*.conf; do
+    [ -f "$conf" ] || continue
+    if grep -qE "$pattern" "$conf"; then
+      printf '%s\n' "$conf"
+    fi
+  done
+  if [ "$nullglob_was" -eq 0 ]; then
+    shopt -u nullglob
+  fi
+}
+
+# Prints the effective session.upload_progress.enabled value for every
+# installed PHP-FPM version. Returns 1 when a value is still on or a pool
+# turns it back on. With missing_ok=1 and no PHP-FPM, prints one line and
+# returns 0.
+php_upload_progress_check() {
+  local missing_ok="${1:-0}"
+  local dir version state version_list
+  local -a versions=() fpm_versions=() value_needs_fix=() overrides=()
+
+  if [ -d /etc/php ]; then
+    for dir in /etc/php/*; do
+      [ -d "$dir" ] || continue
+      version="$(basename "$dir")"
+      [[ "$version" =~ ^[0-9]+\.[0-9]+$ ]] || continue
+      if command -v "php${version}" >/dev/null 2>&1; then
+        versions+=("$version")
+      fi
+    done
+  fi
+
+  if [ ${#versions[@]} -eq 0 ]; then
+    if [ "$missing_ok" -eq 1 ]; then
+      echo "PHP upload progress: no PHP-FPM installed"
+      return 0
+    fi
+    echo "Error: no PHP versions are installed."
+    echo "Run: server-tool install php"
+    return 1
+  fi
+
+  for version in "${versions[@]}"; do
+    if php_fpm_is_installed "$version"; then
+      fpm_versions+=("$version")
+    fi
+  done
+
+  if [ ${#fpm_versions[@]} -eq 0 ]; then
+    if [ "$missing_ok" -eq 1 ]; then
+      echo "PHP upload progress: no PHP-FPM installed"
+      return 0
+    fi
+    echo "Error: no PHP-FPM versions are installed."
+    echo "Run: server-tool install php"
+    return 1
+  fi
+
+  mapfile -t fpm_versions < <(printf '%s\n' "${fpm_versions[@]}" | sort -V)
+
+  for version in "${fpm_versions[@]}"; do
+    state="$(php_fpm_upload_progress_state "$version")"
+    printf 'PHP %s FPM: session.upload_progress.enabled = %s\n' "$version" "$state"
+    if ! php_upload_progress_is_disabled "$state"; then
+      value_needs_fix+=("$version")
+    fi
+  done
+
+  mapfile -t overrides < <(php_fpm_upload_progress_enabling_pools)
+  if [ ${#value_needs_fix[@]} -gt 0 ]; then
+    version_list="$(printf '%s, ' "${value_needs_fix[@]}")"
+    version_list="${version_list%, }"
+    echo "Error: session.upload_progress.enabled is still on for PHP ${version_list}."
+  fi
+  if [ ${#overrides[@]} -gt 0 ]; then
+    echo "Error: PHP-FPM pool config enables session.upload_progress.enabled:"
+    for conf in "${overrides[@]}"; do
+      printf '  %s\n' "$conf"
+    done
+  fi
+  if [ ${#value_needs_fix[@]} -gt 0 ] || [ ${#overrides[@]} -gt 0 ]; then
+    return 1
+  fi
+}
+
 ensure_app_supervisor() {
   local username="$1"
   local app_name="$2"
@@ -2515,6 +2658,80 @@ list_server_tool_apps() {
   fi
 
   printf '%s\n' "${apps[@]}" | sort
+}
+
+ensure_app_logrotate() {
+  local tmp username app_name app_root conf owner mode
+
+  if ! command -v logrotate >/dev/null 2>&1; then
+    echo "Installing logrotate..."
+    apt_get update
+    apt_get -y install logrotate
+  fi
+
+  tmp="$(mktemp)"
+  cat > "$tmp" <<'EOF'
+# Generated by server-tool.
+/var/log/server-tool/backup.log {
+    daily
+    missingok
+    rotate 14
+    compress
+    delaycompress
+    notifempty
+    dateext
+    create 644 root root
+}
+
+# log/ is group-writable because nginx has an ACL. su root keeps rotation
+# working for root-owned nginx logs and user-owned worker logs.
+/home/*/*/log/*.log {
+    daily
+    missingok
+    rotate 14
+    compress
+    delaycompress
+    notifempty
+    dateext
+    copytruncate
+    su root root
+}
+EOF
+
+  while read -r username app_name; do
+    [ -n "$username" ] || continue
+    [ -n "$app_name" ] || continue
+    {
+      printf '\n%s\n' "/home/${username}/${app_name}/current/storage/logs/*.log {"
+      cat <<'EOF'
+    daily
+    missingok
+    rotate 14
+    compress
+    delaycompress
+    notifempty
+    dateext
+    copytruncate
+EOF
+      printf '    su %s %s\n}\n' "$username" "$username"
+    } >> "$tmp"
+
+    app_root="/home/${username}/${app_name}"
+    for conf in "$app_root/supervisor/queue.conf" "$app_root/supervisor/horizon.conf"; do
+      [ -f "$conf" ] || continue
+      owner="$(stat -c '%u:%g' "$conf")"
+      mode="$(stat -c '%a' "$conf")"
+      sed -i \
+        -e 's/^stdout_logfile_maxbytes=.*/stdout_logfile_maxbytes=0/' \
+        -e 's/^stdout_logfile_backups=.*/stdout_logfile_backups=0/' \
+        "$conf"
+      chown "$owner" "$conf"
+      chmod "$mode" "$conf"
+    done
+  done < <(list_server_tool_apps || true)
+
+  install -m 644 "$tmp" /etc/logrotate.d/server-tool
+  rm -f "$tmp"
 }
 
 app_auth_column() {

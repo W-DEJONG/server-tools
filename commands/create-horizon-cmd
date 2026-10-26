@@ -87,8 +87,8 @@ numprocs=${numprocs}
 startsecs=1
 redirect_stderr=true
 stdout_logfile=${APP_ROOT}/log/horizon.log
-stdout_logfile_maxbytes=5MB
-stdout_logfile_backups=3
+stdout_logfile_maxbytes=0
+stdout_logfile_backups=0
 stopwaitsecs=5
 stopsignal=SIGTERM
 stopasgroup=true
@@ -107,3 +107,4 @@ echo "  Command: php${php_version} artisan horizon"
 echo "  Log:     $APP_ROOT/log/horizon.log"
 echo
 echo "Reload with: supervisorctl reread && supervisorctl update"
+ensure_app_logrotate

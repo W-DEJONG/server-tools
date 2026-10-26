@@ -207,6 +207,7 @@ systemctl restart php${php_version}-fpm
 nginx -t
 nginx -s reload
 sync_app_monitoring "$username" "$app_name"
+ensure_app_logrotate
 
 if [ -n "$db_name" ] && [ "${CREATED_DB_IS_NEW:-0}" -eq 1 ]; then
   echo "Database credentials written to $app_root/.env.db"

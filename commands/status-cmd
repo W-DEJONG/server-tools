@@ -9,4 +9,10 @@ fi
 
 echo "SSH password login: $(ssh_password_login_state)"
 echo
+php_status=0
+php_upload_progress_check 1 || php_status=$?
+echo
 list_server_tool_apps_verbose
+if [ "$php_status" -ne 0 ]; then
+  exit "$php_status"
+fi

@@ -1,0 +1,96 @@
+#!/bin/bash
+set -eo pipefail
+
+usage="Usage: server-tool check-php-upload-progress [--check] [-y]"
+check_only=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --check)
+      check_only=1
+      shift
+      ;;
+    *)
+      echo "$usage"
+      exit 1
+      ;;
+  esac
+done
+
+if [ "$check_only" -eq 1 ]; then
+  php_upload_progress_check
+  exit 0
+fi
+
+installed_php_versions() {
+  local dir version
+  if [ ! -d /etc/php ]; then
+    return 0
+  fi
+
+  for dir in /etc/php/*; do
+    [ -d "$dir" ] || continue
+    version="$(basename "$dir")"
+    [[ "$version" =~ ^[0-9]+\.[0-9]+$ ]] || continue
+    if command -v "php${version}" >/dev/null 2>&1; then
+      printf '%s\n' "$version"
+    fi
+  done
+}
+
+mapfile -t versions < <(installed_php_versions | sort -V)
+if [ ${#versions[@]} -eq 0 ]; then
+  echo "Error: no PHP versions are installed."
+  echo "Run: server-tool install php"
+  exit 1
+fi
+
+fpm_versions=()
+for version in "${versions[@]}"; do
+  if php_fpm_is_installed "$version"; then
+    fpm_versions+=("$version")
+  fi
+done
+
+if [ ${#fpm_versions[@]} -eq 0 ]; then
+  echo "Error: no PHP-FPM versions are installed."
+  echo "Run: server-tool install php"
+  exit 1
+fi
+
+needs_fix=()
+for version in "${fpm_versions[@]}"; do
+  state="$(php_fpm_upload_progress_state "$version")"
+  printf 'PHP %s FPM: session.upload_progress.enabled = %s\n' "$version" "$state"
+  if php_upload_progress_is_disabled "$state" && php_upload_progress_ini_is_current "$version"; then
+    continue
+  fi
+  needs_fix+=("$version")
+done
+
+if [ ${#needs_fix[@]} -gt 0 ]; then
+  version_list="$(printf '%s, ' "${needs_fix[@]}")"
+  version_list="${version_list%, }"
+  confirm_or_exit "This will set session.upload_progress.enabled=0 for PHP ${version_list} and restart PHP-FPM. Continue? (y/n): "
+
+  for version in "${needs_fix[@]}"; do
+    ensure_php_upload_progress_ini "$version"
+    "php-fpm${version}" -tt
+    systemctl try-restart "php${version}-fpm"
+    state="$(php_fpm_upload_progress_state "$version")"
+    if ! php_upload_progress_is_disabled "$state"; then
+      echo "Error: PHP ${version} FPM still has session.upload_progress.enabled = ${state}."
+      exit 1
+    fi
+    printf 'PHP %s FPM: session.upload_progress.enabled = %s\n' "$version" "$state"
+  done
+fi
+
+mapfile -t overrides < <(php_fpm_upload_progress_enabling_pools)
+if [ ${#overrides[@]} -gt 0 ]; then
+  echo "Error: PHP-FPM pool config enables session.upload_progress.enabled:"
+  for conf in "${overrides[@]}"; do
+    printf '  %s\n' "$conf"
+  done
+  exit 1
+fi

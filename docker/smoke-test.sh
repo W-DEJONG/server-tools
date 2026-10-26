@@ -94,6 +94,8 @@ server-tool help install alloy | grep -q -- '--api-key-file'
 server-tool help install monitoring | grep -q -- '-d <domain>'
 server-tool help update-grafana | grep -q 'Usage:'
 server-tool help update-php | grep -q 'Usage:'
+server-tool help check-php-upload-progress | grep -q 'Usage:'
+server-tool help check-php-upload-progress | grep -q -- '--check'
 server-tool help update-probes | grep -q 'Usage:'
 if server-tool update-grafana -y; then
     echo "Expected update-grafana to fail before monitoring is installed"
@@ -101,6 +103,10 @@ if server-tool update-grafana -y; then
 fi
 if server-tool update-php -y; then
     echo "Expected update-php to fail before PHP is installed"
+    exit 1
+fi
+if server-tool check-php-upload-progress -y; then
+    echo "Expected check-php-upload-progress to fail before PHP is installed"
     exit 1
 fi
 if server-tool update-probes -y; then
@@ -271,6 +277,14 @@ rm -rf "$call_log"
 
 echo "==> init-server"
 server-tool init-server -y
+command -v logrotate >/dev/null
+test -f /etc/logrotate.d/server-tool
+grep -qF '/var/log/server-tool/backup.log' /etc/logrotate.d/server-tool
+grep -qF '/home/*/*/log/*.log' /etc/logrotate.d/server-tool
+grep -qF 'copytruncate' /etc/logrotate.d/server-tool
+grep -qF 'su root root' /etc/logrotate.d/server-tool
+grep -qF 'create 644 root root' /etc/logrotate.d/server-tool
+logrotate -d /etc/logrotate.d/server-tool >/dev/null
 
 echo "==> install nginx"
 server-tool install nginx -y
@@ -485,6 +499,28 @@ grep -qxF 'max_input_time = -1' "$large_files_php_conf"
 php_fpm_info="$(php-fpm${php_version} -i)"
 grep -qE 'upload_max_filesize.*150M' <<< "$php_fpm_info"
 grep -qE 'post_max_size.*151M' <<< "$php_fpm_info"
+upload_progress_php_conf="/etc/php/${php_version}/fpm/conf.d/99-server-tool-upload-progress.ini"
+test -f "$upload_progress_php_conf"
+grep -qxF '; CVE-2026-115560: disable session upload progress until the next PHP bugfix release.' "$upload_progress_php_conf"
+grep -qxF 'session.upload_progress.enabled = 0' "$upload_progress_php_conf"
+grep -qE 'session\.upload_progress\.enabled.*Off' <<< "$php_fpm_info"
+
+echo "==> check-php-upload-progress --check does not write"
+rm -f "$upload_progress_php_conf"
+if check_out="$(server-tool check-php-upload-progress --check)"; then
+    echo "Expected check-php-upload-progress --check to fail when upload progress is enabled"
+    exit 1
+fi
+grep -q 'session.upload_progress.enabled = On' <<<"$check_out"
+test ! -e "$upload_progress_php_conf"
+
+echo "==> check-php-upload-progress restores the drop-in"
+check_out="$(server-tool check-php-upload-progress -y)"
+grep -q 'session.upload_progress.enabled = Off' <<<"$check_out"
+test -f "$upload_progress_php_conf"
+grep -qxF 'session.upload_progress.enabled = 0' "$upload_progress_php_conf"
+php_fpm_info="$(php-fpm${php_version} -i)"
+grep -qE 'session\.upload_progress\.enabled.*Off' <<< "$php_fpm_info"
 
 echo "==> install npm ${other_node_version} ${node_version}"
 server-tool install npm -y "$other_node_version" "$node_version"
@@ -670,6 +706,10 @@ test -f /home/testdev/demo/php-fpm/demo.conf
 test -f /home/testdev/demo/nginx/demo.conf
 grep -q "current/public" /home/testdev/demo/nginx/demo.conf
 grep -qF 'access_log /home/testdev/demo/log/access.log server_tool;' /home/testdev/demo/nginx/demo.conf
+grep -qF '/home/testdev/demo/current/storage/logs/*.log' /etc/logrotate.d/server-tool
+grep -qF 'su testdev testdev' /etc/logrotate.d/server-tool
+grep -qF '/home/*/*/log/*.log' /etc/logrotate.d/server-tool
+logrotate -d /etc/logrotate.d/server-tool >/dev/null
 grep -q "php${php_version}-fpm-testdev-demo.sock" /home/testdev/demo/nginx/demo.conf
 grep -qxF '# nginx-php-mode: strict' /home/testdev/demo/nginx/demo.conf
 grep -qF 'location ~ ^/index\.php(/|$) {' /home/testdev/demo/nginx/demo.conf
@@ -700,6 +740,7 @@ test "$(verbose_app_field testdev demo BACKUP)" = off
 test "$(verbose_app_field testdev demo SCHEDULER)" = off
 test "$(verbose_app_field testdev demo WORKERS)" = off
 [[ "$(server-tool status | awk 'NR==1')" == "SSH password login: disabled" ]]
+server-tool status | grep -qF "PHP ${php_version} FPM: session.upload_progress.enabled = Off"
 [[ "$(server-tool status | awk '$1=="testdev" && $2=="demo" {print $3}')" == "strict" ]]
 getfacl /home/testdev/demo/log | grep -q 'user:alloy:r-x'
 if grep -q 'demo.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json; then
@@ -751,6 +792,11 @@ MYSQL_PWD="$mysql_pass" mysql -h 127.0.0.1 -N -B -u smoke_mysqlapp smoke_mysqlap
 echo "==> delete-app testdev mysqlapp"
 server-tool delete-app testdev mysqlapp -y
 test ! -e /home/testdev/mysqlapp
+if grep -qF '/home/testdev/mysqlapp/current/storage/logs/*.log' /etc/logrotate.d/server-tool; then
+    echo "Expected logrotate config to drop the deleted application"
+    exit 1
+fi
+grep -qF '/home/testdev/demo/current/storage/logs/*.log' /etc/logrotate.d/server-tool
 
 echo "==> start-horizon without config fails"
 if server-tool start-horizon testdev demo -y; then
@@ -769,6 +815,8 @@ server-tool create-horizon testdev demo -y
 test -f /home/testdev/demo/supervisor/horizon.conf
 grep -q "php${php_version} artisan horizon" /home/testdev/demo/supervisor/horizon.conf
 grep -q "directory=/home/testdev/demo/current/" /home/testdev/demo/supervisor/horizon.conf
+grep -q '^stdout_logfile_maxbytes=0$' /home/testdev/demo/supervisor/horizon.conf
+grep -q '^stdout_logfile_backups=0$' /home/testdev/demo/supervisor/horizon.conf
 test -L /etc/supervisor/conf.d/testdev_demo.d
 
 echo "==> create-queue testdev demo"
@@ -778,6 +826,8 @@ grep -q "php${php_version} artisan queue:work --sleep=3 --tries=3 --timeout=60 -
 grep -q "directory=/home/testdev/demo/current/" /home/testdev/demo/supervisor/queue.conf
 grep -q "program:queue-testdev-demo" /home/testdev/demo/supervisor/queue.conf
 grep -q "stopwaitsecs=3600" /home/testdev/demo/supervisor/queue.conf
+grep -q '^stdout_logfile_maxbytes=0$' /home/testdev/demo/supervisor/queue.conf
+grep -q '^stdout_logfile_backups=0$' /home/testdev/demo/supervisor/queue.conf
 
 echo "==> stop-horizon testdev demo"
 server-tool stop-horizon testdev demo -y
@@ -1039,6 +1089,12 @@ server-tool list-jobs testdev | grep -qx 'testdev demo2 horizon-testdev-demo2'
 server-tool list-jobs testdev | grep -qx 'testdev demo2 queue-testdev-demo2'
 grep -q "directory=/home/testdev/demo2/current/" /home/testdev/demo2/supervisor/queue.conf
 grep -q "stdout_logfile=/home/testdev/demo2/log/queue.log" /home/testdev/demo2/supervisor/queue.conf
+grep -q '^stdout_logfile_maxbytes=0$' /home/testdev/demo2/supervisor/queue.conf
+grep -qF '/home/testdev/demo2/current/storage/logs/*.log' /etc/logrotate.d/server-tool
+if grep -qF '/home/testdev/demo/current/storage/logs/*.log' /etc/logrotate.d/server-tool; then
+    echo "Expected logrotate config to follow the renamed application"
+    exit 1
+fi
 grep -q "cd /home/testdev/demo2/current && php${php_version} artisan schedule:run" /home/testdev/demo2/cron/scheduler
 grep -qF "php /home/testdev/demo2/current/artisan extra:job" /home/testdev/demo2/cron/extra
 crontab -u testdev -l | grep -qF '# BEGIN server-tool app: testdev/demo2'
@@ -1140,6 +1196,10 @@ test ! -e "/etc/php/${php_version}/fpm/pool.d/testdev_demo2.conf"
 test ! -e "/etc/php/${other_php_version}/fpm/pool.d/testdev_demo2.conf"
 test ! -e /etc/supervisor/conf.d/testdev_demo2.d
 ! grep -qF '# BEGIN server-tool app: testdev/demo2' <<< "$(crontab -u testdev -l 2>/dev/null || true)"
+if grep -qF '/home/testdev/demo2/current/storage/logs/*.log' /etc/logrotate.d/server-tool; then
+    echo "Expected logrotate config to drop the deleted application"
+    exit 1
+fi
 if grep -q 'demo.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json; then
     echo "Expected HTTP probes to drop the deleted application"
     exit 1

@@ -162,8 +162,8 @@ numprocs=${numprocs}
 startsecs=1
 redirect_stderr=true
 stdout_logfile=${APP_ROOT}/log/queue.log
-stdout_logfile_maxbytes=5MB
-stdout_logfile_backups=3
+stdout_logfile_maxbytes=0
+stdout_logfile_backups=0
 stopwaitsecs=3600
 stopsignal=SIGTERM
 stopasgroup=true
@@ -182,3 +182,4 @@ echo "  Command: $queue_cmd"
 echo "  Log:     $APP_ROOT/log/queue.log"
 echo
 echo "Reload with: supervisorctl reread && supervisorctl update"
+ensure_app_logrotate

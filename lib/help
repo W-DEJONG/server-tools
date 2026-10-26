@@ -38,6 +38,7 @@ command_summary() {
     apply-cron) echo "Apply an application's cron directory to the user's crontab" ;;
     backup-app) echo "Back up an application to S3, or enable/disable its daily cron" ;;
     check-certbot-renew) echo "Check certbot auto-renew and enable it if it is inactive" ;;
+    check-php-upload-progress) echo "Check PHP-FPM session upload progress, and disable it unless --check is set" ;;
     create-app) echo "Create a web application layout, nginx vhost, and php-fpm pool" ;;
     create-db) echo "Create a PostgreSQL or MySQL database and matching user" ;;
     create-github-runner) echo "Install and register a GitHub Actions self-hosted runner" ;;
@@ -71,7 +72,7 @@ command_summary() {
     show-ssh-key) echo "Print an application user's private SSH key as base64" ;;
     start-horizon) echo "Start an application's Laravel Horizon Supervisor program" ;;
     start-queue) echo "Start an application's Laravel queue Supervisor program" ;;
-    status) echo "Show SSH password login and a verbose application overview" ;;
+    status) echo "Show SSH password login, PHP upload progress, and a verbose application overview" ;;
     stop-horizon) echo "Stop an application's Laravel Horizon Supervisor program" ;;
     stop-queue) echo "Stop an application's Laravel queue Supervisor program" ;;
     switch-nginx) echo "Switch an application's nginx PHP mode between strict and legacy" ;;
@@ -130,7 +131,9 @@ Folder layout
     <application>.conf    PHP-FPM pool for this application
   cron/                   One job file per crontab snippet (dotfiles skipped)
   supervisor/             Supervisor programs (horizon, queue, ...)
-  log/                    Nginx access/error logs and worker logs
+  log/                    Nginx access/error logs and worker logs.
+                          Rotated daily by /etc/logrotate.d/server-tool.
+                          Supervisor does not rotate these logs.
   .env.db                 Database credentials (only when create-app -d created a new DB)
 
 Optional files after other commands:
@@ -158,6 +161,12 @@ System files
 /etc/cron.d/server-tool-backup-<username>-<application>
     Daily S3 backup (backup-app --enable). The filename is sanitized to
     letters, digits, and hyphens so cron does not ignore it.
+
+/etc/logrotate.d/server-tool
+    Daily rotation for log/*.log, current/storage/logs/*.log, and
+    /var/log/server-tool/backup.log. Rewritten when an application is
+    created, renamed, or deleted. Queue and Horizon logs are not rotated
+    by Supervisor.
 
 User crontab
 ------------
@@ -695,6 +704,35 @@ Examples:
   server-tool check-certbot-renew -y
 EOF
       ;;
+    check-php-upload-progress)
+      cat <<'EOF'
+check-php-upload-progress
+
+Check that session.upload_progress.enabled is off for every installed
+PHP-FPM version (CVE-2026-115560). --check only prints the value and
+exits with an error when it is still on. Nothing is written or restarted.
+
+Without --check, if the setting is still on or the server-tool drop-in
+is missing, you are asked before writing
+
+  /etc/php/<version>/fpm/conf.d/99-server-tool-upload-progress.ini
+
+and restarting PHP-FPM. A stopped PHP-FPM service stays stopped.
+Pool configs that turn the setting back on are reported and left unchanged.
+
+Usage:
+  server-tool check-php-upload-progress [--check] [-y]
+
+Options:
+  --check        Report the setting and do not change it
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool check-php-upload-progress --check
+  server-tool check-php-upload-progress
+  server-tool check-php-upload-progress -y
+EOF
+      ;;
     enable-ssl)
       cat <<'EOF'
 enable-ssl
@@ -762,8 +800,10 @@ init-server
 
 Configure a new Debian server with default packages and settings.
 
-Sets UTC, installs common tools, enables the SURY PHP repo, and upgrades
-packages. Extra arguments are ignored.
+Sets UTC, installs common tools (including logrotate), enables the SURY
+PHP repo, and upgrades packages. Writes /etc/logrotate.d/server-tool so
+application logs, Laravel logs, and the backup log rotate daily. Extra
+arguments are ignored.
 
 Usage:
   server-tool init-server [-y]
@@ -1091,10 +1131,15 @@ EOF
       cat <<'EOF'
 status
 
-Show whether SSH password login is enabled, then the verbose application list.
+Show whether SSH password login is enabled, whether PHP-FPM session
+upload progress is off, then the verbose application list.
 
 Password login is disabled only when sshd's effective configuration has
 both passwordauthentication and kbdinteractiveauthentication set to no.
+The upload-progress lines are the same check as
+server-tool check-php-upload-progress --check. Nothing is changed.
+Status exits with an error when that setting is still on.
+Without PHP-FPM, status reports that and continues.
 The application table is the same as list-apps -v.
 
 Usage:
