@@ -205,11 +205,7 @@ if [ -d "$workdir/db" ]; then
 fi
 
 echo "Uploading archive to $s3_uri"
-aws_cmd=(aws s3 cp --only-show-errors "$zip_file" "$s3_uri")
-if [ -n "${S3_REGION:-}" ]; then
-  aws_cmd+=(--region "$S3_REGION")
-fi
-"${aws_cmd[@]}"
+aws_s3_upload "$zip_file" "$s3_uri"
 
 echo
 echo "Backup uploaded to $s3_uri"

@@ -245,6 +245,12 @@ Without --enable or --disable, zips the application (and database when
 dump-db. Requires /etc/server-tool/backup.conf, written by:
 server-tool install aws <bucket>
 
+The upload sends a Content-MD5 header, including on every part of a large
+archive. A bucket with S3 Object Lock and a default retention period
+requires that header. Object Lock keeps versioning on, so each later backup
+of the same weekday is stored as a new version. Older versions stay until
+their retention period ends.
+
 Usage:
   server-tool backup-app <username> <application> [--enable|--disable] [-y]
 
@@ -1196,6 +1202,9 @@ Upload a small test object to verify S3 backup config.
 
 Requires /etc/server-tool/backup.conf, written by:
   server-tool install aws <bucket>
+
+The upload sends a Content-MD5 header so a bucket with S3 Object Lock and
+a default retention period accepts the object.
 
 Usage:
   server-tool test-backup [-y]

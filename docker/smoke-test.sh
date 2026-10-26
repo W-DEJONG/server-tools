@@ -1186,43 +1186,150 @@ test "$(verbose_app_field testdev demo BACKUP)" = off
 echo "==> install aws smoke-bucket (stub CLI)"
 cat > /usr/local/bin/aws <<'EOF'
 #!/bin/bash
-set -e
-if [ "$1" != "s3" ] || [ "$2" != "cp" ]; then
+set -euo pipefail
+
+if [ "${AWS_REQUEST_CHECKSUM_CALCULATION:-}" != "when_required" ]; then
+    echo "aws stub: expected AWS_REQUEST_CHECKSUM_CALCULATION=when_required" >&2
+    exit 1
+fi
+if [ "${AWS_RESPONSE_CHECKSUM_VALIDATION:-}" != "when_required" ]; then
+    echo "aws stub: expected AWS_RESPONSE_CHECKSUM_VALIDATION=when_required" >&2
+    exit 1
+fi
+if [ "${1:-}" != "s3api" ] || [ -z "${2:-}" ]; then
     echo "aws stub: unexpected: $*" >&2
     exit 1
 fi
+
+op="$2"
 shift 2
-src=""
-dest=""
+bucket=""
+key=""
+body=""
+content_md5=""
+upload_id=""
+part_number=""
+multipart_upload=""
 while [ $# -gt 0 ]; do
     case "$1" in
-        --only-show-errors)
-            shift
-            ;;
-        --region)
-            shift 2
-            ;;
-        s3://*)
-            dest="$1"
-            shift
-            ;;
+        --bucket) bucket="$2"; shift 2 ;;
+        --key) key="$2"; shift 2 ;;
+        --body) body="$2"; shift 2 ;;
+        --content-md5) content_md5="$2"; shift 2 ;;
+        --region) shift 2 ;;
+        --upload-id) upload_id="$2"; shift 2 ;;
+        --part-number) part_number="$2"; shift 2 ;;
+        --multipart-upload) multipart_upload="$2"; shift 2 ;;
+        --query) shift 2 ;;
+        --output) shift 2 ;;
         *)
-            if [ -z "$src" ]; then
-                src="$1"
-            else
-                dest="$1"
-            fi
-            shift
+            echo "aws stub: unexpected arg: $1" >&2
+            exit 1
             ;;
     esac
 done
-if [ -z "$src" ] || [ -z "$dest" ]; then
-    echo "aws stub: missing src or dest" >&2
+
+if [ -z "$bucket" ] || [ -z "$key" ]; then
+    echo "aws stub: missing bucket or key" >&2
     exit 1
 fi
-rel="${dest#s3://}"
-mkdir -p "/tmp/s3-mock/$(dirname "$rel")"
-cp "$src" "/tmp/s3-mock/$rel"
+
+mkdir -p /tmp/s3-mock
+log_op() {
+    printf '%s\n' "$1" >> /tmp/s3-mock/ops.log
+}
+
+require_content_md5() {
+    local expected
+    if [ -z "$body" ] || [ ! -f "$body" ]; then
+        echo "aws stub: missing body" >&2
+        exit 1
+    fi
+    if [ -z "$content_md5" ]; then
+        echo "aws stub: Content-MD5 is required" >&2
+        exit 1
+    fi
+    expected="$(openssl dgst -md5 -binary "$body" | openssl base64 | tr -d '\n')"
+    if [ "$content_md5" != "$expected" ]; then
+        echo "aws stub: content-md5 mismatch for $key" >&2
+        echo "  got:      $content_md5" >&2
+        echo "  expected: $expected" >&2
+        exit 1
+    fi
+}
+
+case "$op" in
+    put-object)
+        require_content_md5
+        mkdir -p "/tmp/s3-mock/$bucket/$(dirname "$key")"
+        cp "$body" "/tmp/s3-mock/$bucket/$key"
+        log_op "put-object $bucket $key"
+        ;;
+    create-multipart-upload)
+        upload_id="upid-${bucket}-${key//\//_}-$$"
+        mkdir -p "/tmp/s3-mock-uploads/$upload_id"
+        printf '%s\n' "$bucket" > "/tmp/s3-mock-uploads/$upload_id/bucket"
+        printf '%s\n' "$key" > "/tmp/s3-mock-uploads/$upload_id/key"
+        log_op "create $bucket $key"
+        printf '%s\n' "$upload_id"
+        ;;
+    upload-part)
+        require_content_md5
+        if [ -z "$upload_id" ] || [ -z "$part_number" ]; then
+            echo "aws stub: missing upload id or part number" >&2
+            exit 1
+        fi
+        if [ ! -d "/tmp/s3-mock-uploads/$upload_id" ]; then
+            echo "aws stub: unknown upload id $upload_id" >&2
+            exit 1
+        fi
+        cp "$body" "/tmp/s3-mock-uploads/$upload_id/$part_number"
+        log_op "upload-part $bucket $key $part_number"
+        printf '"%s"\n' "$(openssl dgst -md5 "$body" | awk '{print $NF}')"
+        ;;
+    complete-multipart-upload)
+        if [ -z "$upload_id" ] || [ -z "$multipart_upload" ]; then
+            echo "aws stub: missing upload id or part list" >&2
+            exit 1
+        fi
+        python3 - "$multipart_upload" "/tmp/s3-mock-uploads/$upload_id" "/tmp/s3-mock/$bucket/$key" <<'PY'
+import hashlib, json, os, sys
+
+spec_path, upload_dir, dest = sys.argv[1:]
+if spec_path.startswith("file://"):
+    spec_path = spec_path[len("file://"):]
+with open(spec_path, encoding="utf-8") as handle:
+    spec = json.load(handle)
+os.makedirs(os.path.dirname(dest), exist_ok=True)
+with open(dest, "wb") as out:
+    for part in spec["Parts"]:
+        number = part["PartNumber"]
+        etag = str(part["ETag"]).strip('"')
+        path = os.path.join(upload_dir, str(number))
+        with open(path, "rb") as handle:
+            data = handle.read()
+        digest = hashlib.md5(data).hexdigest()
+        if digest != etag:
+            sys.stderr.write(f"aws stub: etag mismatch for part {number}: {etag} != {digest}\n")
+            sys.exit(1)
+        out.write(data)
+PY
+        log_op "complete $bucket $key"
+        rm -rf "/tmp/s3-mock-uploads/$upload_id"
+        ;;
+    abort-multipart-upload)
+        if [ -z "$upload_id" ]; then
+            echo "aws stub: missing upload id" >&2
+            exit 1
+        fi
+        log_op "abort $bucket $key $upload_id"
+        rm -rf "/tmp/s3-mock-uploads/$upload_id"
+        ;;
+    *)
+        echo "aws stub: unexpected operation: $op" >&2
+        exit 1
+        ;;
+esac
 EOF
 chmod +x /usr/local/bin/aws
 server-tool install aws smoke-bucket -y
@@ -1233,6 +1340,7 @@ echo "==> test-backup"
 server-tool test-backup -y
 server_name="$(hostname -s)"
 test -s "/tmp/s3-mock/smoke-bucket/${server_name}/.server-tool-check"
+grep -qxF "put-object smoke-bucket ${server_name}/.server-tool-check" /tmp/s3-mock/ops.log
 
 echo "==> backup-app testdev demo"
 mkdir -p /home/testdev/demo/log /home/testdev/demo/releases/old
@@ -1267,6 +1375,18 @@ grep -q '^db/demo-.*\.dump$' <<< "$zip_list"
 ! grep -q 'nginx/ssl' <<< "$zip_list"
 ! grep -q 'storage/framework' <<< "$zip_list"
 ! grep -q 'storage/logs' <<< "$zip_list"
+grep -qxF "put-object smoke-bucket ${server_name}/testdev/demo/${weekday}.zip" /tmp/s3-mock/ops.log
+
+echo "==> s3 multipart upload sends Content-MD5 per part"
+# shellcheck disable=SC1091
+source "$repo_dir/lib/common"
+multipart_src="$(mktemp)"
+dd if=/dev/zero of="$multipart_src" bs=1048576 count=65 status=none
+aws_s3_upload "$multipart_src" "s3://smoke-bucket/multipart-check.bin"
+test "$(grep -c '^upload-part smoke-bucket multipart-check.bin ' /tmp/s3-mock/ops.log)" = 2
+grep -qxF "complete smoke-bucket multipart-check.bin" /tmp/s3-mock/ops.log
+cmp "$multipart_src" /tmp/s3-mock/smoke-bucket/multipart-check.bin
+rm -f "$multipart_src"
 
 echo "==> verify packages"
 "php${php_version}" -v

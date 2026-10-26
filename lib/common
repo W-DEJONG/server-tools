@@ -2242,6 +2242,194 @@ require_aws_cli() {
   fi
 }
 
+# Base64 MD5 of the file. Object Lock buckets with a default retention period
+# reject PutObject and UploadPart unless this value is sent as Content-MD5.
+s3_content_md5() {
+  (
+    set -o pipefail
+    openssl dgst -md5 -binary "$1" | openssl base64 | tr -d '\n'
+  )
+}
+
+aws_s3api() {
+  local -a cmd=(aws s3api "$@")
+
+  if [ -n "${S3_REGION:-}" ]; then
+    cmd+=(--region "$S3_REGION")
+  fi
+
+  # Keep the body unchunked so Content-MD5 matches the bytes S3 stores.
+  # A trailing CRC64NVME checksum is not accepted for Object Lock parts.
+  AWS_PAGER="" \
+  AWS_REQUEST_CHECKSUM_CALCULATION=when_required \
+  AWS_RESPONSE_CHECKSUM_VALIDATION=when_required \
+    "${cmd[@]}"
+}
+
+aws_s3_put_object() {
+  local src="$1"
+  local bucket="$2"
+  local key="$3"
+  local content_md5
+
+  content_md5="$(s3_content_md5 "$src")" || exit
+  aws_s3api put-object \
+    --bucket "$bucket" \
+    --key "$key" \
+    --body "$src" \
+    --content-md5 "$content_md5" \
+    >/dev/null || exit
+}
+
+aws_s3_multipart_upload() {
+  local src="$1"
+  local bucket="$2"
+  local key="$3"
+  local part_size="$4"
+  local size="$5"
+
+  (
+    set -o pipefail
+    parts_dir="$(mktemp -d)" || exit
+    upload_id=""
+
+    cleanup_s3_multipart() {
+      local status=$?
+
+      if [ -n "${upload_id:-}" ]; then
+        aws_s3api abort-multipart-upload \
+          --bucket "$bucket" \
+          --key "$key" \
+          --upload-id "$upload_id" \
+          >/dev/null 2>&1 || true
+      fi
+      if [ -n "${parts_dir:-}" ] && [ -d "$parts_dir" ]; then
+        rm -rf "$parts_dir"
+      fi
+      exit "$status"
+    }
+    trap cleanup_s3_multipart EXIT
+
+    upload_id="$(aws_s3api create-multipart-upload \
+      --bucket "$bucket" \
+      --key "$key" \
+      --query UploadId \
+      --output text)" || exit
+    if [ -z "$upload_id" ]; then
+      echo "Error: S3 did not return a multipart upload id"
+      exit 1
+    fi
+
+    offset=0
+    part_number=1
+    part_etags=()
+    part_numbers=()
+    while [ "$offset" -lt "$size" ]; do
+      if [ "$part_number" -gt 10000 ]; then
+        echo "Error: S3 multipart upload exceeds 10000 parts"
+        exit 1
+      fi
+
+      part_file="$parts_dir/part-$part_number"
+      dd if="$src" of="$part_file" bs="$part_size" skip="$((part_number - 1))" count=1 iflag=fullblock status=none || exit
+      part_bytes="$(wc -c < "$part_file" | tr -d '[:space:]')" || exit
+      if [ "$part_bytes" -eq 0 ]; then
+        echo "Error: could not read part $part_number of $src"
+        exit 1
+      fi
+
+      content_md5="$(s3_content_md5 "$part_file")" || exit
+      etag="$(aws_s3api upload-part \
+        --bucket "$bucket" \
+        --key "$key" \
+        --upload-id "$upload_id" \
+        --part-number "$part_number" \
+        --body "$part_file" \
+        --content-md5 "$content_md5" \
+        --query ETag \
+        --output text)" || exit
+      etag="${etag//\"/}"
+      etag="${etag//[[:space:]]/}"
+      if [ -z "$etag" ]; then
+        echo "Error: S3 did not return an ETag for part $part_number"
+        exit 1
+      fi
+      part_etags+=("$etag")
+      part_numbers+=("$part_number")
+      rm -f "$part_file"
+
+      offset=$((offset + part_bytes))
+      part_number=$((part_number + 1))
+    done
+
+    parts_json="$parts_dir/parts.json"
+    {
+      printf '%s\n' '{' '  "Parts": ['
+      last=$((${#part_etags[@]} - 1))
+      for i in "${!part_etags[@]}"; do
+        if [ "$i" -eq "$last" ]; then
+          printf '    {"ETag": "%s", "PartNumber": %s}\n' "${part_etags[$i]}" "${part_numbers[$i]}"
+        else
+          printf '    {"ETag": "%s", "PartNumber": %s},\n' "${part_etags[$i]}" "${part_numbers[$i]}"
+        fi
+      done
+      printf '%s\n' '  ]' '}'
+    } > "$parts_json"
+
+    aws_s3api complete-multipart-upload \
+      --bucket "$bucket" \
+      --key "$key" \
+      --upload-id "$upload_id" \
+      --multipart-upload "file://${parts_json}" \
+      >/dev/null || exit
+
+    upload_id=""
+    trap - EXIT
+    rm -rf "$parts_dir"
+  )
+}
+
+aws_s3_upload() {
+  local src="$1"
+  local uri="$2"
+  local rest bucket key size part_size
+
+  if [ ! -f "$src" ]; then
+    echo "Error: upload source not found: $src"
+    exit 1
+  fi
+
+  case "$uri" in
+    s3://*/*) ;;
+    *)
+      echo "Error: invalid S3 uri '$uri'"
+      exit 1
+      ;;
+  esac
+
+  rest="${uri#s3://}"
+  bucket="${rest%%/*}"
+  key="${rest#*/}"
+  if [ -z "$bucket" ] || [ -z "$key" ]; then
+    echo "Error: invalid S3 uri '$uri'"
+    exit 1
+  fi
+
+  if ! command -v openssl >/dev/null 2>&1; then
+    echo "Error: openssl is required to upload to S3. Run: server-tool init-server"
+    exit 1
+  fi
+
+  # Above this size S3 needs multipart. Every part still carries Content-MD5.
+  part_size=$((64 * 1024 * 1024))
+  size="$(wc -c < "$src" | tr -d '[:space:]')" || exit
+  if [ "$size" -le "$part_size" ]; then
+    aws_s3_put_object "$src" "$bucket" "$key"
+  else
+    aws_s3_multipart_upload "$src" "$bucket" "$key" "$part_size" "$size" || exit
+  fi
+}
+
 cron_d_safe_name() {
   local original="$1"
   local name
