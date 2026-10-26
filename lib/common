@@ -2242,6 +2242,15 @@ require_aws_cli() {
   fi
 }
 
+# /tmp is often a small tmpfs. Large archives and upload parts go on disk.
+large_temp_dir() {
+  if [ ! -d /var/tmp ] || [ ! -w /var/tmp ]; then
+    echo "Error: /var/tmp is not writable" >&2
+    exit 1
+  fi
+  mktemp -d -p /var/tmp
+}
+
 # Base64 MD5 of the file. Object Lock buckets with a default retention period
 # reject PutObject and UploadPart unless this value is sent as Content-MD5.
 s3_content_md5() {
@@ -2290,7 +2299,7 @@ aws_s3_multipart_upload() {
 
   (
     set -o pipefail
-    parts_dir="$(mktemp -d)" || exit
+    parts_dir="$(large_temp_dir)" || exit
     upload_id=""
 
     cleanup_s3_multipart() {

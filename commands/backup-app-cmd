@@ -134,8 +134,9 @@ cleanup_backup_workdir() {
 }
 trap cleanup_backup_workdir EXIT
 
-workdir="$(mktemp -d)"
+workdir="$(large_temp_dir)" || exit
 chmod 700 "$workdir"
+echo "Work directory: $workdir"
 zip_file="$workdir/${app_name}-${weekday}.zip"
 
 if [ -f "$APP_ROOT/.env.db" ]; then

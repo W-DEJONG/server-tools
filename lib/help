@@ -251,6 +251,9 @@ requires that header. Object Lock keeps versioning on, so each later backup
 of the same weekday is stored as a new version. Older versions stay until
 their retention period ends.
 
+The archive and database dump are built in /var/tmp and removed after the
+upload.
+
 Usage:
   server-tool backup-app <username> <application> [--enable|--disable] [-y]
 
