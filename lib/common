@@ -25,8 +25,8 @@ require_supported_debian() {
   esac
 }
 
-# Debian 12/13 can run every command. Ubuntu 22.04/24.04 can only install
-# Forge Alloy logging, and refresh it after that install.
+# Debian 12/13 can run every command. Ubuntu 22.04/24.04 can install Forge
+# Alloy logging, refresh it after that install, and self-update.
 host_is_supported() {
   local id="$1"
   local codename="$2"
@@ -57,6 +57,9 @@ ubuntu_forge_command_allowed() {
   shift || true
 
   case "$cmd" in
+    self-update)
+      return 0
+      ;;
     update-probes)
       [ "$(alloy_layout)" = "forge" ]
       ;;
@@ -126,7 +129,8 @@ require_supported_host() {
 
   if [ "$id" = "ubuntu" ]; then
     echo "Error: Ubuntu ${codename:-unknown} cannot run this command."
-    echo "Only Laravel Forge logging is supported, on Ubuntu 22.04 (jammy) and 24.04 (noble):"
+    echo "Ubuntu 22.04 (jammy) and 24.04 (noble) can self-update, and install Laravel Forge logging:"
+    echo "  server-tool self-update"
     echo "  server-tool install alloy --url <https://host> --api-key-file <file> --forge"
     if [ "${1:-}" = "update-probes" ] && [ "$(alloy_layout)" != "forge" ]; then
       echo "update-probes on Ubuntu requires that Forge install first."

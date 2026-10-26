@@ -1510,6 +1510,18 @@ if ! host_is_supported ubuntu noble install alloy --url https://grafana.example.
     echo "Expected Ubuntu 24.04 to allow install alloy --forge"
     exit 1
 fi
+if ! host_is_supported ubuntu jammy self-update; then
+    echo "Expected Ubuntu 22.04 to allow self-update"
+    exit 1
+fi
+if ! host_is_supported ubuntu noble self-update; then
+    echo "Expected Ubuntu 24.04 to allow self-update"
+    exit 1
+fi
+if host_is_supported ubuntu focal self-update; then
+    echo "Expected Ubuntu 20.04 to reject self-update"
+    exit 1
+fi
 if host_is_supported ubuntu jammy install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key; then
     echo "Expected Ubuntu to reject install alloy without --forge"
     exit 1

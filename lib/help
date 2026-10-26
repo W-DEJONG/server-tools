@@ -1049,6 +1049,8 @@ self-update
 
 Update server-tools from git (git pull in the install directory).
 
+This also runs on Ubuntu 22.04 and 24.04, where it updates the Forge Alloy install.
+
 Usage:
   server-tool self-update
 
@@ -1665,7 +1667,7 @@ domain, SSL, rename and delete commands update the HTTP checks.
 update-probes also rewrites the Alloy config.
 
 On a Laravel Forge server, add --forge. Ubuntu 22.04 and 24.04 can run
-this install and update-probes. Other commands stay on Debian 12 and 13.
+this install, update-probes, and self-update. Other commands stay on Debian 12 and 13.
 Forge Laravel logs are read from /home/<user>/<site>/storage/logs, which
 is also the shared storage of a zero-downtime deploy. Nginx error logs
 and access counts come from /var/log/nginx/<domain>-error.log and
