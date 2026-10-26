@@ -21,7 +21,7 @@ groups:
                 type: loki
                 uid: loki
               editorMode: code
-              expr: 'sum(count_over_time({logtype="backup", result="failed"}[15m]))'
+              expr: 'sum by (server, username, application) (count_over_time({logtype="backup", result="failed"}[15m]))'
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -59,6 +59,7 @@ groups:
         execErrState: Error
         for: 0s
         annotations:
-          summary: A backup failed in the last 15 minutes
+          summary: 'Backup failed for {{ $labels.username }}/{{ $labels.application }} on {{ $labels.server }}'
+          description: 'The backup of application {{ $labels.application }} for user {{ $labels.username }} on server {{ $labels.server }} failed in the last 15 minutes.'
         labels: {}
         isPaused: false

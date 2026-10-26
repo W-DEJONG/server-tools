@@ -394,6 +394,9 @@ grep -q '\[24h\]' /var/lib/grafana/dashboards/server-tools/backups.json
 grep -q 'noDataState: OK' /etc/grafana/provisioning/alerting/backup-failed.yaml
 grep -q 'result="failed"' /etc/grafana/provisioning/alerting/backup-failed.yaml
 grep -q 'uid: backup_failed' /etc/grafana/provisioning/alerting/backup-failed.yaml
+grep -q 'sum by (server, username, application)' /etc/grafana/provisioning/alerting/backup-failed.yaml
+grep -q '{{ $labels.username }}' /etc/grafana/provisioning/alerting/backup-failed.yaml
+grep -q '{{ $labels.application }}' /etc/grafana/provisioning/alerting/backup-failed.yaml
 grep -q 'GF_AUTH_ANONYMOUS_ENABLED=false' /etc/systemd/system/grafana-server.service.d/server-tool.conf
 grep -q 'GF_SERVER_ROOT_URL=https://monitor.example.test/' /etc/systemd/system/grafana-server.service.d/server-tool.conf
 systemctl is-active --quiet prometheus
