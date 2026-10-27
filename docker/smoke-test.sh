@@ -439,6 +439,16 @@ grep -q '15 \* 1024 \* 1024 \* 1024' /etc/grafana/provisioning/alerting/disk-spa
 grep -q '> 80' /etc/grafana/provisioning/alerting/disk-space.yaml
 grep -q 'for: 5m' /etc/grafana/provisioning/alerting/disk-space.yaml
 grep -q '{{ $labels.mountpoint }}' /etc/grafana/provisioning/alerting/disk-space.yaml
+grep -q 'uid: cpu_high' /etc/grafana/provisioning/alerting/cpu-high.yaml
+grep -q 'node_cpu_seconds_total{mode="idle"}' /etc/grafana/provisioning/alerting/cpu-high.yaml
+grep -q '> 80' /etc/grafana/provisioning/alerting/cpu-high.yaml
+grep -q 'for: 5m' /etc/grafana/provisioning/alerting/cpu-high.yaml
+grep -q '{{ $labels.server }}' /etc/grafana/provisioning/alerting/cpu-high.yaml
+grep -q 'uid: memory_high' /etc/grafana/provisioning/alerting/memory-high.yaml
+grep -q 'node_memory_MemAvailable_bytes' /etc/grafana/provisioning/alerting/memory-high.yaml
+grep -q '> 80' /etc/grafana/provisioning/alerting/memory-high.yaml
+grep -q 'for: 5m' /etc/grafana/provisioning/alerting/memory-high.yaml
+grep -q '{{ $labels.server }}' /etc/grafana/provisioning/alerting/memory-high.yaml
 grep -q 'GF_AUTH_ANONYMOUS_ENABLED=false' /etc/systemd/system/grafana-server.service.d/server-tool.conf
 grep -q 'GF_SERVER_ROOT_URL=https://monitor.example.test/' /etc/systemd/system/grafana-server.service.d/server-tool.conf
 grep -q -- '--storage.tsdb.retention.time=30d' /etc/systemd/system/prometheus.service.d/server-tool.conf

@@ -3105,6 +3105,8 @@ install_grafana_dashboards() {
   mkdir -p /etc/grafana/provisioning/alerting
   install -m 644 -o root -g grafana "$src/alerting/backup-failed.yaml" /etc/grafana/provisioning/alerting/backup-failed.yaml
   install -m 644 -o root -g grafana "$src/alerting/disk-space.yaml" /etc/grafana/provisioning/alerting/disk-space.yaml
+  install -m 644 -o root -g grafana "$src/alerting/cpu-high.yaml" /etc/grafana/provisioning/alerting/cpu-high.yaml
+  install -m 644 -o root -g grafana "$src/alerting/memory-high.yaml" /etc/grafana/provisioning/alerting/memory-high.yaml
 }
 
 monitoring_config_file() {

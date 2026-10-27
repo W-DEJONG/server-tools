@@ -78,7 +78,7 @@ command_summary() {
     switch-nginx) echo "Switch an application's nginx PHP mode between strict and legacy" ;;
     switch-php) echo "Switch an application to another PHP version" ;;
     test-backup) echo "Upload a small test object to verify S3 backup config" ;;
-    update-grafana) echo "Replace the shipped Grafana dashboards and install the backup and disk alerts" ;;
+    update-grafana) echo "Replace the shipped Grafana dashboards and install the backup, disk, CPU and memory alerts" ;;
     update-monitoring) echo "Refresh Prometheus retention and Loki config without reinstalling monitoring" ;;
     update-php) echo "Upgrade every installed PHP version to the latest patch" ;;
     update-probes) echo "Update Alloy config, application log access, nginx request logs, and HTTP probes" ;;
@@ -1285,7 +1285,7 @@ EOF
 update-grafana
 
 Replace the shipped Server tools dashboards with the templates from this
-server-tool install, and install the backup failure and disk space alerts.
+server-tool install, and install the backup, disk, CPU and memory alerts.
 Datasources, passwords and nginx are left unchanged. Dashboards reload
 within 30 seconds. Grafana is restarted when it is already running so the
 alert rules are loaded.
@@ -1750,9 +1750,9 @@ metrics and journal on this server with: server-tool install alloy --monitoring
 
 Certbot creates the certificate. The Server tools folder in Grafana
 contains the server, HTTP check, application log and backup dashboards,
-an alert when a backup fails, and an alert when disk space is low
-(above 80% used or under 15 GB free). Refresh those later with:
-server-tool update-grafana
+and alerts for backup failure, low disk space (above 80% used or under
+15 GB free), high CPU (above 80%) and high memory (above 80%). Refresh
+those later with: server-tool update-grafana
 
 Usage:
   server-tool install monitoring -d <domain> -e <email> [-y]
