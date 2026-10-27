@@ -75,7 +75,9 @@ server-tool help | grep -q app-structure
 
 echo "==> help create-app prints usage"
 server-tool help create-app | grep -q 'Usage:'
+server-tool help create-app | grep -q -- '--http-port'
 server-tool help switch-nginx | grep -q 'Usage:'
+server-tool help switch-nginx | grep -q 'HTTP listen port'
 server-tool help list-apps | grep -q -- '-v'
 server-tool help status | grep -q 'Usage:'
 
@@ -748,6 +750,9 @@ grep -qF '/home/*/*/log/*.log' /etc/logrotate.d/server-tool
 logrotate -d /etc/logrotate.d/server-tool >/dev/null
 grep -q "php${php_version}-fpm-testdev-demo.sock" /home/testdev/demo/nginx/demo.conf
 grep -qxF '# nginx-php-mode: strict' /home/testdev/demo/nginx/demo.conf
+grep -qxF '# nginx-http-port: 80' /home/testdev/demo/nginx/demo.conf
+grep -qxF '    listen 80;' /home/testdev/demo/nginx/demo.conf
+grep -qxF '    listen [::]:80;' /home/testdev/demo/nginx/demo.conf
 grep -qF 'location ~ ^/index\.php(/|$) {' /home/testdev/demo/nginx/demo.conf
 if grep -q 'fastcgi_split_path_info' /home/testdev/demo/nginx/demo.conf; then
     echo "Expected the default nginx config to omit fastcgi_split_path_info"
@@ -802,6 +807,8 @@ echo "==> create-app testdev mysqlapp -d smoke_mysqlapp -t mysql"
 server-tool create-app testdev mysqlapp -d smoke_mysqlapp -t mysql -p "$php_version" --nginx legacy -y
 test -f /home/testdev/mysqlapp/.env.db
 grep -qxF '# nginx-php-mode: legacy' /home/testdev/mysqlapp/nginx/mysqlapp.conf
+grep -qxF '# nginx-http-port: 80' /home/testdev/mysqlapp/nginx/mysqlapp.conf
+grep -qxF '    listen 80;' /home/testdev/mysqlapp/nginx/mysqlapp.conf
 grep -q 'fastcgi_split_path_info' /home/testdev/mysqlapp/nginx/mysqlapp.conf
 test "$(verbose_app_field testdev mysqlapp NGINX)" = legacy
 test "$(verbose_app_field testdev mysqlapp AUTH)" = off
@@ -833,6 +840,32 @@ if grep -qF '/home/testdev/mysqlapp/current/storage/logs/*.log' /etc/logrotate.d
     exit 1
 fi
 grep -qF '/home/testdev/demo/current/storage/logs/*.log' /etc/logrotate.d/server-tool
+
+echo "==> create-app testdev portapp --http-port 8080"
+if server-tool create-app testdev portapp --http-port 70000 -y; then
+    echo "Expected an HTTP port above 65535 to fail"
+    exit 1
+fi
+server-tool create-app testdev portapp -p "$php_version" --http-port 8080 -y
+grep -qxF '# nginx-http-port: 8080' /home/testdev/portapp/nginx/portapp.conf
+grep -qxF '    listen 8080;' /home/testdev/portapp/nginx/portapp.conf
+grep -qxF '    listen [::]:8080;' /home/testdev/portapp/nginx/portapp.conf
+if grep -qxF '    listen 80;' /home/testdev/portapp/nginx/portapp.conf || grep -qxF '    listen [::]:80;' /home/testdev/portapp/nginx/portapp.conf; then
+    echo "Expected portapp to listen on 8080"
+    exit 1
+fi
+server-tool switch-nginx testdev portapp -m legacy -y
+grep -qxF '# nginx-php-mode: legacy' /home/testdev/portapp/nginx/portapp.conf
+grep -qxF '# nginx-http-port: 8080' /home/testdev/portapp/nginx/portapp.conf
+grep -qxF '    listen 8080;' /home/testdev/portapp/nginx/portapp.conf
+grep -qxF '    listen [::]:8080;' /home/testdev/portapp/nginx/portapp.conf
+server-tool switch-nginx testdev portapp -m strict -y
+grep -qxF '# nginx-php-mode: strict' /home/testdev/portapp/nginx/portapp.conf
+grep -qxF '# nginx-http-port: 8080' /home/testdev/portapp/nginx/portapp.conf
+grep -qxF '    listen 8080;' /home/testdev/portapp/nginx/portapp.conf
+grep -qxF '    listen [::]:8080;' /home/testdev/portapp/nginx/portapp.conf
+server-tool delete-app testdev portapp -y
+test ! -e /home/testdev/portapp
 
 echo "==> start-horizon without config fails"
 if server-tool start-horizon testdev demo -y; then
@@ -972,6 +1005,9 @@ test -f /home/testdev/demo/nginx/ssl/demo.example.test.key
 grep -q "return 301 https" /home/testdev/demo/nginx/demo.conf
 grep -qF 'access_log /home/testdev/demo/log/access.log server_tool;' /home/testdev/demo/nginx/demo.conf
 grep -qxF '# nginx-php-mode: strict' /home/testdev/demo/nginx/demo.conf
+grep -qxF '# nginx-http-port: 80' /home/testdev/demo/nginx/demo.conf
+grep -qxF '    listen 80;' /home/testdev/demo/nginx/demo.conf
+grep -qxF '    listen [::]:80;' /home/testdev/demo/nginx/demo.conf
 grep -qF 'location ~ ^/index\.php(/|$) {' /home/testdev/demo/nginx/demo.conf
 test "$(verbose_app_field testdev demo SSL)" = self-signed
 
@@ -1158,8 +1194,19 @@ if server-tool switch-nginx testdev demo2 -y; then
     echo "Expected switch-nginx -y without -m to fail"
     exit 1
 fi
+sed -i \
+    -e 's/listen 80;/listen 8080;/' \
+    -e 's/listen \[::\]:80;/listen [::]:8080;/' \
+    /home/testdev/demo2/nginx/demo2.conf
 server-tool switch-nginx testdev demo2 -m legacy -y
 grep -qxF '# nginx-php-mode: legacy' /home/testdev/demo2/nginx/demo2.conf
+grep -qxF '# nginx-http-port: 8080' /home/testdev/demo2/nginx/demo2.conf
+grep -qxF '    listen 8080;' /home/testdev/demo2/nginx/demo2.conf
+grep -qxF '    listen [::]:8080;' /home/testdev/demo2/nginx/demo2.conf
+if grep -qxF '    listen 80;' /home/testdev/demo2/nginx/demo2.conf || grep -qxF '    listen [::]:80;' /home/testdev/demo2/nginx/demo2.conf; then
+    echo "Expected switch-nginx to keep HTTP port 8080"
+    exit 1
+fi
 grep -q 'fastcgi_split_path_info' /home/testdev/demo2/nginx/demo2.conf
 grep -qE 'server_name[[:space:]]+.*demo\.example\.test' /home/testdev/demo2/nginx/demo2.conf
 grep -qE 'server_name[[:space:]]+.*demo2' /home/testdev/demo2/nginx/demo2.conf
@@ -1169,6 +1216,13 @@ test -f /home/testdev/demo2/nginx/ssl/demo.example.test.pem
 test -f /home/testdev/demo2/nginx/ssl/demo.example.test.key
 server-tool switch-nginx testdev demo2 -m strict -y
 grep -qxF '# nginx-php-mode: strict' /home/testdev/demo2/nginx/demo2.conf
+grep -qxF '# nginx-http-port: 8080' /home/testdev/demo2/nginx/demo2.conf
+grep -qxF '    listen 8080;' /home/testdev/demo2/nginx/demo2.conf
+grep -qxF '    listen [::]:8080;' /home/testdev/demo2/nginx/demo2.conf
+if grep -qxF '    listen 80;' /home/testdev/demo2/nginx/demo2.conf || grep -qxF '    listen [::]:80;' /home/testdev/demo2/nginx/demo2.conf; then
+    echo "Expected switch-nginx to keep HTTP port 8080"
+    exit 1
+fi
 grep -qF 'location ~ ^/index\.php(/|$) {' /home/testdev/demo2/nginx/demo2.conf
 if grep -q 'fastcgi_split_path_info' /home/testdev/demo2/nginx/demo2.conf; then
     echo "Expected strict nginx config to omit fastcgi_split_path_info"

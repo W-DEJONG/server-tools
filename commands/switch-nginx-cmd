@@ -52,6 +52,7 @@ if [ "$nginx_php_mode" = "$current_mode" ]; then
   exit 1
 fi
 
+http_port="$(app_http_port_from_nginx "$APP_NGINX_CONF")"
 php_version="$(app_php_version_from_nginx "$APP_NGINX_CONF")"
 if [ -z "$php_version" ]; then
   echo "Error: could not determine PHP version from $APP_NGINX_CONF"
@@ -80,6 +81,7 @@ echo "Username: $username"
 echo "Application: $app_name"
 echo "Current nginx PHP mode: $current_mode"
 echo "New nginx PHP mode: $nginx_php_mode"
+echo "HTTP port: $http_port"
 confirm_or_exit "This will switch application '$app_name' from nginx PHP mode ${current_mode} to ${nginx_php_mode}. Do you want to proceed? (y/n): "
 
 if [ "$ssl" -eq 1 ]; then
@@ -90,6 +92,7 @@ if [ "$ssl" -eq 1 ]; then
     "$app_name" \
     "$APP_ROOT" \
     "$php_version" \
+    "$http_port" \
     "$server_names" \
     "$ssl_cert" \
     "$ssl_key"
@@ -101,6 +104,7 @@ else
     "$app_name" \
     "$APP_ROOT" \
     "$php_version" \
+    "$http_port" \
     "$server_names"
 fi
 chown "$username:$username" "$APP_NGINX_CONF"

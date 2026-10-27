@@ -70,6 +70,7 @@ if grep -q 'listen 443' "$old_nginx_conf"; then
   ssl_enabled=1
 fi
 nginx_php_mode="$(nginx_php_mode_from_conf "$old_nginx_conf")"
+http_port="$(app_http_port_from_nginx "$old_nginx_conf")"
 
 server_name=""
 name_is_present() {
@@ -185,6 +186,7 @@ if [ "$ssl_enabled" -eq 1 ]; then
     "$new_app" \
     "$new_root" \
     "$php_version" \
+    "$http_port" \
     "$server_name" \
     "$ssl_cert" \
     "$ssl_key"
@@ -196,6 +198,7 @@ else
     "$new_app" \
     "$new_root" \
     "$php_version" \
+    "$http_port" \
     "$server_name"
 fi
 chown "$username:$username" "$new_root/nginx/${new_app}.conf"

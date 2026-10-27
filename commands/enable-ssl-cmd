@@ -241,6 +241,7 @@ else
     "$app_name" \
     "$APP_ROOT" \
     "$php_version" \
+    "$(app_http_port_from_nginx "$APP_NGINX_CONF")" \
     "$server_names" \
     "$ssl_cert" \
     "$ssl_key"

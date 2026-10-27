@@ -501,6 +501,40 @@ apply_nginx_request_log_format() {
   fi
 }
 
+nginx_http_port_is_valid() {
+  local port="$1"
+  case "$port" in
+    ''|*[!0-9]*|0*) return 1 ;;
+  esac
+  if [ "${#port}" -gt 5 ]; then
+    return 1
+  fi
+  [ "$port" -ge 1 ] && [ "$port" -le 65535 ]
+}
+
+app_http_port_from_nginx() {
+  local conf="$1"
+  local port=""
+  port="$(awk '
+    /^[[:space:]]*listen[[:space:]]+[0-9]+[[:space:]]*;/ {
+      port = $2
+      sub(/;.*/, "", port)
+      print port
+      exit
+    }
+  ' "$conf")"
+  if nginx_http_port_is_valid "$port"; then
+    printf '%s\n' "$port"
+    return 0
+  fi
+  port="$(sed -n 's/^# nginx-http-port: //p' "$conf" | head -1)"
+  if nginx_http_port_is_valid "$port"; then
+    printf '%s\n' "$port"
+    return 0
+  fi
+  printf '%s\n' 80
+}
+
 render_nginx_app_conf() {
   local template="$1"
   local dest="$2"
@@ -508,15 +542,22 @@ render_nginx_app_conf() {
   local app_name="$4"
   local app_root="$5"
   local php_version="$6"
-  local server_name="$7"
-  local ssl_cert="${8:-}"
-  local ssl_key="${9:-}"
+  local http_port="$7"
+  local server_name="$8"
+  local ssl_cert="${9:-}"
+  local ssl_key="${10:-}"
+
+  if ! nginx_http_port_is_valid "$http_port"; then
+    echo "Error: invalid HTTP port '$http_port'."
+    exit 1
+  fi
 
   ensure_nginx_request_log_format
   sed -e "s|{{USERNAME}}|$username|g" \
       -e "s|{{APP_NAME}}|$app_name|g" \
       -e "s|{{APP_ROOT}}|$app_root|g" \
       -e "s|{{PHP_VERSION}}|$php_version|g" \
+      -e "s|{{HTTP_PORT}}|$http_port|g" \
       -e "s|{{SERVER_NAME}}|$server_name|g" \
       -e "s|{{SSL_CERT}}|$ssl_cert|g" \
       -e "s|{{SSL_KEY}}|$ssl_key|g" \

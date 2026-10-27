@@ -298,6 +298,8 @@ Create a web application layout, nginx vhost, and php-fpm pool.
 
 strict (the default) sends only public/index.php to PHP-FPM and returns
 404 for every other .php file. legacy runs any .php file under public/.
+The HTTP listen port defaults to 80. --http-port records another port in
+the nginx vhost. Later commands that rewrite the vhost keep that port.
 
 Usage:
   server-tool create-app <username> <application> [options] [-y]
@@ -317,6 +319,7 @@ Options:
   --user-host HOST           MySQL user host (default %)
   -p, --php VERSION          PHP version for the fpm pool
   --nginx strict|legacy      Nginx PHP mode (default: strict)
+  --http-port PORT           HTTP listen port (default: 80)
   -y, --yes                  Skip confirmation prompts
 
 Examples:
@@ -325,6 +328,7 @@ Examples:
   server-tool create-app testdev demo -d mijnapp -t mysql --host db.internal --admin-user root -y
   server-tool create-app testdev demo -d mijnapp -t pgsql --host db.internal --admin-user postgres -y
   server-tool create-app testdev demo --nginx legacy -y
+  server-tool create-app testdev demo --http-port 8080 -y
 
 See also:
   server-tool help app-structure
@@ -1211,7 +1215,8 @@ Switch an application's nginx PHP mode.
 strict sends only public/index.php to PHP-FPM and returns 404 for every
 other .php file. legacy runs any .php file that exists under public/.
 New applications use strict. Existing configs without a mode marker are
-treated as legacy. HTTPS, server_name, and the PHP socket are kept.
+treated as legacy. The HTTP listen port, HTTPS, server_name, and the
+PHP socket are kept.
 
 Usage:
   server-tool switch-nginx <username> <application> [-m strict|legacy] [-y]

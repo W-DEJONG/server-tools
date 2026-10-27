@@ -6,8 +6,9 @@ db_name=""
 db_type=""
 php_version=""
 nginx_php_mode=""
+http_port="80"
 positionals=()
-usage="Usage: server-tool create-app <username> <application> [-u] [-d <db_name>] [-t pgsql|mysql] [--host <host>] [--port <port>] [--admin-user <user>] [--admin-password <password>] [--user-host <mysql-user-host>] [-p <php-version>] [--nginx strict|legacy] [-y]"
+usage="Usage: server-tool create-app <username> <application> [-u] [-d <db_name>] [-t pgsql|mysql] [--host <host>] [--port <port>] [--admin-user <user>] [--admin-password <password>] [--user-host <mysql-user-host>] [-p <php-version>] [--nginx strict|legacy] [--http-port <port>] [-y]"
 while [ $# -gt 0 ]; do
   if try_parse_remote_db_option "$@"; then
     shift "$CONSUMED"
@@ -59,6 +60,19 @@ while [ $# -gt 0 ]; do
       nginx_php_mode="$2"
       shift 2
       ;;
+    --http-port)
+      if [ -z "${2:-}" ]; then
+        echo "Error: --http-port requires a port"
+        echo "$usage"
+        exit 1
+      fi
+      if ! nginx_http_port_is_valid "$2"; then
+        echo "Error: invalid HTTP port '$2'."
+        exit 1
+      fi
+      http_port="$2"
+      shift 2
+      ;;
     *)
       positionals+=("$1")
       shift
@@ -76,6 +90,7 @@ app_name="${positionals[1]}"
 
 echo "Username: $username"
 echo "Application: $app_name"
+echo "HTTP port: $http_port"
 if [ "$create_user" -eq 1 ]; then
   echo "Create user: yes"
 fi
@@ -191,6 +206,7 @@ render_nginx_app_conf \
     "$app_name" \
     "$app_root" \
     "$php_version" \
+    "$http_port" \
     "$app_name"
 
 chown -R "$username:$username" "$app_root"
