@@ -3139,7 +3139,7 @@ alloy_layout() {
 
   layout="$(tr -d '[:space:]' < "$file")"
   case "$layout" in
-    forge|server-tool)
+    forge|server-tool|monitoring)
       printf '%s\n' "$layout"
       ;;
     *)
@@ -3153,7 +3153,7 @@ write_alloy_layout() {
   local file
 
   case "$layout" in
-    forge|server-tool)
+    forge|server-tool|monitoring)
       ;;
     *)
       echo "Error: unknown Alloy layout '$layout'."
@@ -3175,11 +3175,25 @@ alloy_config_template() {
     forge)
       printf '%s\n' "$SERVER_TOOL_ROOT/templates/alloy/config-forge.alloy"
       ;;
+    monitoring)
+      printf '%s\n' "$SERVER_TOOL_ROOT/templates/alloy/config-monitoring.alloy"
+      ;;
     *)
       echo "Error: unknown Alloy layout '$1'." >&2
       return 1
       ;;
   esac
+}
+
+monitoring_domain_from_url() {
+  local url="$1"
+  local domain
+
+  domain="${url#https://}"
+  domain="${domain#http://}"
+  domain="${domain%%/*}"
+  domain="${domain%%:*}"
+  printf '%s\n' "$domain"
 }
 
 render_alloy_config() {
@@ -3188,13 +3202,15 @@ render_alloy_config() {
   local server_name="$3"
   local layout="$4"
   local dest="$5"
-  local template
+  local template domain
 
+  domain="$(monitoring_domain_from_url "$url")"
   template="$(alloy_config_template "$layout")"
   sed \
     -e "s|__MONITORING_URL__|${url}|g" \
     -e "s|__API_KEY__|${api_key}|g" \
     -e "s|__SERVER_NAME__|${server_name}|g" \
+    -e "s|__MONITORING_DOMAIN__|${domain}|g" \
     "$template" > "$dest"
 
   if alloy validate --help >/dev/null 2>&1; then
@@ -3588,6 +3604,37 @@ sync_forge_monitoring() {
 
   grant_forge_log_access
   write_forge_blackbox_targets
+}
+
+write_monitoring_host_blackbox_targets() {
+  local domain url probe_name server entry
+  local config
+
+  config="$(monitoring_config_file)"
+  if [ ! -f "$config" ]; then
+    echo "Error: monitoring config not found: $config"
+    exit 1
+  fi
+
+  domain="$(sed -n 's/^MONITORING_DOMAIN=//p' "$config" | sed -n '1p')"
+  if [ -z "$domain" ]; then
+    echo "Error: MONITORING_DOMAIN is missing from $config"
+    exit 1
+  fi
+
+  server="$(hostname -s)"
+  url="https://${domain}"
+  probe_name="monitoring_grafana_${domain}"
+  entry="$(monitoring_blackbox_entry "$url" "$probe_name" "monitoring" "grafana" "$domain" "$server")"
+  monitoring_write_blackbox_file "$entry"
+}
+
+sync_monitoring_host_monitoring() {
+  if ! command -v alloy >/dev/null 2>&1; then
+    return 0
+  fi
+
+  write_monitoring_host_blackbox_targets
 }
 
 list_certbot_deploy_hooks() {

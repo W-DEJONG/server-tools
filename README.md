@@ -68,6 +68,9 @@ server-tool install alloy --url https://grafana.example.com --api-key-file /root
 # Laravel Forge on Ubuntu 22.04 or 24.04. Copy the monitoring API key onto that server first.
 server-tool install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key --forge
 server-tool install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key --forge -y
+# On the monitoring server itself (reads /etc/server-tool/monitoring.conf)
+server-tool install alloy --monitoring
+server-tool install alloy --monitoring -y
 server-tool update-grafana
 server-tool update-grafana -y
 server-tool update-monitoring

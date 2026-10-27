@@ -92,6 +92,7 @@ server-tool help app-structure | grep -q 'current'
 echo "==> help install alloy and monitoring"
 server-tool help install alloy | grep -q -- '--api-key-file'
 server-tool help install alloy | grep -q -- '--forge'
+server-tool help install alloy | grep -q -- '--monitoring'
 server-tool help install alloy | grep -q 'Ubuntu 22.04'
 server-tool help install monitoring | grep -q -- '-d <domain>'
 server-tool help update-grafana | grep -q 'Usage:'
@@ -128,6 +129,14 @@ if server-tool install alloy -y; then
 fi
 if server-tool install alloy --forge -y; then
     echo "Expected install alloy --forge without a URL to fail"
+    exit 1
+fi
+if server-tool install alloy --monitoring -y; then
+    echo "Expected install alloy --monitoring to fail before monitoring is installed"
+    exit 1
+fi
+if server-tool install alloy --forge --monitoring -y; then
+    echo "Expected install alloy with both --forge and --monitoring to fail"
     exit 1
 fi
 if server-tool install monitoring -y; then
@@ -1647,5 +1656,46 @@ grep -q 'update-probes -y' /etc/cron.d/server-tool-forge-monitoring
 grep -q 'PATH=' /etc/cron.d/server-tool-forge-monitoring
 remove_forge_monitoring_cron
 test ! -f /etc/cron.d/server-tool-forge-monitoring
+
+echo "==> monitoring host alloy layout"
+monitoring_cfg="$(mktemp)"
+render_alloy_config "https://monitor.example.test" "test-key" "monitor-host" monitoring "$monitoring_cfg"
+grep -F 'logtype = "journal"' "$monitoring_cfg" >/dev/null
+grep -F '/var/log/nginx/access.log' "$monitoring_cfg" >/dev/null
+grep -F '/var/log/nginx/error.log' "$monitoring_cfg" >/dev/null
+grep -F 'domain        = "monitor.example.test"' "$monitoring_cfg" >/dev/null
+grep -F 'username      = "monitoring"' "$monitoring_cfg" >/dev/null
+grep -F 'application   = "grafana"' "$monitoring_cfg" >/dev/null
+grep -F 'loki_process_custom_nginx_requests_total' "$monitoring_cfg" >/dev/null
+grep -F 'https://monitor.example.test/loki/api/v1/push' "$monitoring_cfg" >/dev/null
+if grep -F 'backup.log' "$monitoring_cfg"; then
+    echo "Expected the monitoring Alloy config to omit backup logs"
+    exit 1
+fi
+if grep -F '/home/*/*/' "$monitoring_cfg"; then
+    echo "Expected the monitoring Alloy config to omit application home globs"
+    exit 1
+fi
+if grep -F 'host=(?P<domain>' "$monitoring_cfg"; then
+    echo "Expected the monitoring Alloy config to use a fixed domain label"
+    exit 1
+fi
+if grep -F '__MONITORING_DOMAIN__' "$monitoring_cfg"; then
+    echo "Expected __MONITORING_DOMAIN__ to be replaced"
+    exit 1
+fi
+rm -f "$monitoring_cfg"
+
+saved_probes="$(mktemp)"
+cp /var/lib/server-tool/monitoring/blackbox-targets.json "$saved_probes"
+write_monitoring_host_blackbox_targets
+grep -q 'https://monitor.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json
+grep -q '"username": "monitoring"' /var/lib/server-tool/monitoring/blackbox-targets.json
+grep -q '"application": "grafana"' /var/lib/server-tool/monitoring/blackbox-targets.json
+grep -q '"domain": "monitor.example.test"' /var/lib/server-tool/monitoring/blackbox-targets.json
+cp "$saved_probes" /var/lib/server-tool/monitoring/blackbox-targets.json
+rm -f "$saved_probes"
+grep -qxF server-tool /etc/server-tool/alloy-layout
+grep -F '/home/*/*/current/storage/logs/*.log' /etc/alloy/config.alloy >/dev/null
 
 echo "==> smoke test passed"

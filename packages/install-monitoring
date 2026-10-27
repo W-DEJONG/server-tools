@@ -219,5 +219,8 @@ echo "  Login:    admin"
 echo "  Password: stored in ${config_file}"
 echo "  API key:  ${api_key_file}"
 echo
+echo "On this monitoring server, collect host metrics and journal with:"
+echo "  server-tool install alloy --monitoring -y"
+echo
 echo "On each application server, copy the API key file and run:"
 echo "  server-tool install alloy --url https://${domain} --api-key-file ${api_key_file} -y"

@@ -7,13 +7,21 @@ if [ $# -ne 0 ]; then
   exit 1
 fi
 
+layout="$(alloy_layout)"
+
 if ! command -v alloy >/dev/null 2>&1; then
   echo "Error: Grafana Alloy is not installed."
-  if [ "$(alloy_layout)" = "forge" ]; then
-    echo "Run: server-tool install alloy --url <https://host> --api-key-file <file> --forge"
-  else
-    echo "Run: server-tool install alloy --url <https://host> --api-key-file <file>"
-  fi
+  case "$layout" in
+    forge)
+      echo "Run: server-tool install alloy --url <https://host> --api-key-file <file> --forge"
+      ;;
+    monitoring)
+      echo "Run: server-tool install alloy --monitoring"
+      ;;
+    *)
+      echo "Run: server-tool install alloy --url <https://host> --api-key-file <file>"
+      ;;
+  esac
   exit 1
 fi
 
@@ -29,15 +37,20 @@ server_name="$(hostname -s)"
 
 if [ -z "$url" ] || [ -z "$api_key" ]; then
   echo "Error: could not read the monitoring URL or API key from $config."
-  if [ "$(alloy_layout)" = "forge" ]; then
-    echo "Run server-tool install alloy --forge once to repair the configuration."
-  else
-    echo "Run server-tool install alloy once to repair the configuration."
-  fi
+  case "$layout" in
+    forge)
+      echo "Run server-tool install alloy --forge once to repair the configuration."
+      ;;
+    monitoring)
+      echo "Run server-tool install alloy --monitoring once to repair the configuration."
+      ;;
+    *)
+      echo "Run server-tool install alloy once to repair the configuration."
+      ;;
+  esac
   exit 1
 fi
 
-layout="$(alloy_layout)"
 if [ "$layout" = "forge" ]; then
   confirm_or_exit "This will update Alloy, Forge log access and HTTP probes. Nginx site files are left unchanged. Continue? (y/n): "
 
@@ -61,6 +74,37 @@ if [ "$layout" = "forge" ]; then
   echo "  Config: $config"
   echo "  File: $(monitoring_blackbox_targets_file)"
   echo "  Cron: $(forge_monitoring_cron_file)"
+  if [ "$changed" -eq 1 ]; then
+    echo "Alloy was restarted because its config changed."
+  else
+    echo "Alloy config is unchanged, so Alloy was not restarted."
+  fi
+  echo "Probe targets are picked up within 30 seconds."
+  exit 0
+fi
+
+if [ "$layout" = "monitoring" ]; then
+  confirm_or_exit "This will update Alloy on this monitoring server and refresh its HTTP probe. Continue? (y/n): "
+
+  tmp="$(mktemp)"
+  render_alloy_config "$url" "$api_key" "$server_name" monitoring "$tmp"
+  changed=0
+  if ! cmp -s "$tmp" "$config"; then
+    publish_alloy_config "$tmp"
+    changed=1
+  fi
+  rm -f "$tmp"
+
+  sync_monitoring_host_monitoring
+  remove_forge_monitoring_cron
+  if [ "$changed" -eq 1 ]; then
+    systemctl restart alloy
+  fi
+
+  echo
+  echo "Grafana Alloy on this monitoring server updated."
+  echo "  Config: $config"
+  echo "  File: $(monitoring_blackbox_targets_file)"
   if [ "$changed" -eq 1 ]; then
     echo "Alloy was restarted because its config changed."
   else

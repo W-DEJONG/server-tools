@@ -1359,6 +1359,9 @@ config, log access and the HTTP probes discovered from nginx. Forge nginx
 site files are not modified. Alloy restarts only when the config changed.
 A daily cron runs this refresh.
 
+On the monitoring server (install alloy --monitoring) it refreshes the
+host Alloy config and the single HTTPS probe for Grafana.
+
 Usage:
   server-tool update-probes [-y]
 
@@ -1415,6 +1418,7 @@ Examples:
   server-tool install monitoring -d grafana.example.com -e admin@example.com -y
   server-tool install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key -y
   server-tool install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key --forge -y
+  server-tool install alloy --monitoring -y
 
 Use: server-tool help install <package>
 EOF
@@ -1701,18 +1705,26 @@ forge when the path does not include a Linux user. Backup logs are not
 collected. A daily cron refreshes log access and HTTP probes after sites
 are added. update-probes does the same and keeps the Forge layout.
 
+On the monitoring server itself, use --monitoring. URL and API key are
+read from /etc/server-tool/monitoring.conf. Alloy collects host metrics,
+the journal, default nginx access and error logs, and one HTTPS probe
+for Grafana. There are no Laravel or backup log paths.
+
 Usage:
   server-tool install alloy --url <https://host> --api-key-file <file> [--forge] [-y]
+  server-tool install alloy --monitoring [-y]
 
 Options:
   --url URL                  Grafana site, for example https://grafana.example.com
   --api-key-file FILE        File that contains the monitoring API key
   --forge                    Laravel Forge paths (Ubuntu 22.04, 24.04, or Debian)
+  --monitoring               Monitor this Grafana/Prometheus/Loki host
   -y, --yes                  Skip confirmation prompts
 
 Examples:
   server-tool install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key -y
   server-tool install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key --forge -y
+  server-tool install alloy --monitoring -y
 EOF
       ;;
     monitoring)
@@ -1728,7 +1740,8 @@ localhost. A generated API key and Grafana admin password are stored in
 /etc/server-tool/monitoring.conf. Prometheus keeps metrics for 30 days.
 Repeating the install keeps that key and password, applies the retention,
 and restarts Prometheus. Refresh Prometheus and Loki later without the
-domain and email with: server-tool update-monitoring
+domain and email with: server-tool update-monitoring. Collect host
+metrics and journal on this server with: server-tool install alloy --monitoring
 
 Certbot creates the certificate. The Server tools folder in Grafana
 contains the server, HTTP check, application log and backup dashboards,
