@@ -25,5 +25,6 @@ fi
 echo
 echo "Grafana dashboards updated."
 echo "  Dashboards: /var/lib/grafana/dashboards/server-tools"
-echo "  Alert:      /etc/grafana/provisioning/alerting/backup-failed.yaml"
-echo "Dashboards reload within 30 seconds. A running Grafana is restarted so the alert rule is loaded."
+echo "  Alerts:     /etc/grafana/provisioning/alerting/backup-failed.yaml"
+echo "              /etc/grafana/provisioning/alerting/disk-space.yaml"
+echo "Dashboards reload within 30 seconds. A running Grafana is restarted so the alert rules are loaded."

@@ -3063,6 +3063,7 @@ install_grafana_dashboards() {
   install -m 644 -o grafana -g grafana "$src/dashboards/backups.json" "$dest/backups.json"
   mkdir -p /etc/grafana/provisioning/alerting
   install -m 644 -o root -g grafana "$src/alerting/backup-failed.yaml" /etc/grafana/provisioning/alerting/backup-failed.yaml
+  install -m 644 -o root -g grafana "$src/alerting/disk-space.yaml" /etc/grafana/provisioning/alerting/disk-space.yaml
 }
 
 monitoring_config_file() {

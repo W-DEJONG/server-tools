@@ -431,6 +431,12 @@ grep -q 'uid: backup_failed' /etc/grafana/provisioning/alerting/backup-failed.ya
 grep -q 'sum by (server, username, application)' /etc/grafana/provisioning/alerting/backup-failed.yaml
 grep -q '{{ $labels.username }}' /etc/grafana/provisioning/alerting/backup-failed.yaml
 grep -q '{{ $labels.application }}' /etc/grafana/provisioning/alerting/backup-failed.yaml
+grep -q 'uid: disk_space_low' /etc/grafana/provisioning/alerting/disk-space.yaml
+grep -q 'node_filesystem_avail_bytes' /etc/grafana/provisioning/alerting/disk-space.yaml
+grep -q '15 \* 1024 \* 1024 \* 1024' /etc/grafana/provisioning/alerting/disk-space.yaml
+grep -q '> 80' /etc/grafana/provisioning/alerting/disk-space.yaml
+grep -q 'for: 5m' /etc/grafana/provisioning/alerting/disk-space.yaml
+grep -q '{{ $labels.mountpoint }}' /etc/grafana/provisioning/alerting/disk-space.yaml
 grep -q 'GF_AUTH_ANONYMOUS_ENABLED=false' /etc/systemd/system/grafana-server.service.d/server-tool.conf
 grep -q 'GF_SERVER_ROOT_URL=https://monitor.example.test/' /etc/systemd/system/grafana-server.service.d/server-tool.conf
 grep -q -- '--storage.tsdb.retention.time=30d' /etc/systemd/system/prometheus.service.d/server-tool.conf
