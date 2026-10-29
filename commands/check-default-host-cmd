@@ -1,0 +1,43 @@
+#!/bin/bash
+set -eo pipefail
+
+usage="Usage: server-tool check-default-host [--check] [-y]"
+check_only=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --check)
+      check_only=1
+      shift
+      ;;
+    *)
+      echo "$usage"
+      exit 1
+      ;;
+  esac
+done
+
+if ! command -v nginx >/dev/null 2>&1; then
+  echo "Error: nginx is not installed."
+  echo "Run: server-tool install nginx"
+  exit 1
+fi
+
+report_status=0
+nginx_default_host_report || report_status=$?
+if [ "$report_status" -eq 2 ]; then
+  exit 1
+fi
+if [ "$check_only" -eq 1 ]; then
+  exit "$report_status"
+fi
+if [ "$report_status" -eq 0 ]; then
+  exit 0
+fi
+
+confirm_or_exit "This will add an nginx default host for sockets without default_server. Unknown HTTP hosts return 500 with 'No active host found'. Unknown HTTPS hosts reject the TLS handshake. Continue? (y/n): "
+
+nginx_default_host_apply
+reload_nginx
+echo
+nginx_default_host_report

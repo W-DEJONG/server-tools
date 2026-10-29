@@ -20,6 +20,7 @@ client_max_body_size 150M;
 fastcgi_read_timeout 180;
 EOF
 
+nginx_default_host_apply
 nginx -t
 nginx -s reload
 

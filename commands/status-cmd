@@ -12,7 +12,17 @@ echo
 php_status=0
 php_upload_progress_check 1 || php_status=$?
 echo
+default_host_status=0
+if command -v nginx >/dev/null 2>&1; then
+  nginx_default_host_report || default_host_status=$?
+  if [ "$default_host_status" -eq 2 ]; then
+    default_host_status=1
+  fi
+else
+  echo "Default host: nginx is not installed"
+fi
+echo
 list_server_tool_apps_verbose
-if [ "$php_status" -ne 0 ]; then
-  exit "$php_status"
+if [ "$php_status" -ne 0 ] || [ "$default_host_status" -ne 0 ]; then
+  exit 1
 fi

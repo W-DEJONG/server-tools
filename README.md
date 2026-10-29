@@ -44,6 +44,9 @@ server-tool update-php -y
 server-tool check-php-upload-progress --check
 server-tool check-php-upload-progress
 server-tool check-php-upload-progress -y
+server-tool check-default-host --check
+server-tool check-default-host
+server-tool check-default-host -y
 server-tool install npm
 server-tool install npm -y 24
 server-tool install npm -y 22 24

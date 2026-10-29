@@ -102,6 +102,10 @@ server-tool help update-monitoring | grep -q 'Usage:'
 server-tool help update-php | grep -q 'Usage:'
 server-tool help check-php-upload-progress | grep -q 'Usage:'
 server-tool help check-php-upload-progress | grep -q -- '--check'
+server-tool help check-default-host | grep -q 'Usage:'
+server-tool help check-default-host | grep -q -- '--check'
+server-tool help status | grep -q 'default host'
+server-tool help install nginx | grep -q 'default host'
 server-tool help update-probes | grep -q 'Usage:'
 if server-tool update-grafana -y; then
     echo "Expected update-grafana to fail before monitoring is installed"
@@ -117,6 +121,10 @@ if server-tool update-php -y; then
 fi
 if server-tool check-php-upload-progress -y; then
     echo "Expected check-php-upload-progress to fail before PHP is installed"
+    exit 1
+fi
+if server-tool check-default-host --check; then
+    echo "Expected check-default-host to fail before nginx is installed"
     exit 1
 fi
 if server-tool update-probes -y; then
@@ -323,6 +331,31 @@ grep -qF 'client_max_body_size 150M;' <<< "$nginx_config"
 grep -qF 'fastcgi_read_timeout 180;' <<< "$nginx_config"
 grep -qF 'log_format server_tool' <<< "$nginx_config"
 grep -qF 'host=$host' <<< "$nginx_config"
+default_host_conf=/etc/nginx/conf.d/00-server-tool-default-host.conf
+default_host_page=/var/www/server-tool/no-host.html
+test -f "$default_host_conf"
+test -f "$default_host_page"
+grep -q 'default_server' "$default_host_conf"
+grep -qF 'No active host found' "$default_host_page"
+server-tool check-default-host --check
+default_host_check="$(server-tool check-default-host --check)"
+grep -qF 'Default host *:80: explicit' <<<"$default_host_check"
+grep -qF '00-server-tool-default-host.conf' <<<"$default_host_check"
+if grep -qF ': missing' <<<"$default_host_check"; then
+    echo "Expected install nginx to set an explicit default host"
+    exit 1
+fi
+default_host_body="$(mktemp)"
+default_host_code="$(curl -sS -o "$default_host_body" -w '%{http_code}' -H 'Host: unknown.example' http://127.0.0.1/)"
+[[ "$default_host_code" == "500" ]]
+grep -qF 'No active host found' "$default_host_body"
+localhost_code="$(curl -sS -o "$default_host_body" -w '%{http_code}' -H 'Host: localhost' http://127.0.0.1/)"
+[[ "$localhost_code" == "200" ]]
+if grep -qF 'No active host found' "$default_host_body"; then
+    echo "Expected localhost to keep the named nginx server"
+    exit 1
+fi
+rm -f "$default_host_body"
 
 echo "==> check-certbot-renew"
 server-tool check-certbot-renew -y
@@ -409,6 +442,33 @@ grep -q 'proxy_pass http://127.0.0.1:3000;' /etc/nginx/sites-available/monitorin
 grep -q 'client_max_body_size 32m;' /etc/nginx/sites-available/monitoring
 grep -q 'listen 443 ssl;' /etc/nginx/sites-available/monitoring
 grep -q 'return 301 https://' /etc/nginx/sites-available/monitoring
+
+echo "==> default host rejects unknown https"
+if server-tool check-default-host --check; then
+    echo "Expected check-default-host to fail when 443 has no default_server"
+    exit 1
+fi
+default_host_check="$(mktemp)"
+server-tool check-default-host --check >"$default_host_check" || true
+grep -qF 'Default host *:443 ssl: missing' "$default_host_check"
+rm -f "$default_host_check"
+server-tool check-default-host -y
+grep -q 'ssl_reject_handshake on;' /etc/nginx/conf.d/00-server-tool-default-host.conf
+if grep -q 'listen 443 ssl default_server' /etc/nginx/sites-available/monitoring; then
+    echo "Expected monitoring to keep its own listen 443 ssl"
+    exit 1
+fi
+server-tool check-default-host -y
+[[ "$(grep -c 'listen 443 ssl default_server;' /etc/nginx/conf.d/00-server-tool-default-host.conf)" -eq 1 ]]
+server-tool check-default-host --check
+timeout 5 openssl s_client -connect 127.0.0.1:443 -servername unknown.example </dev/null >/tmp/unknown-sni 2>&1 || true
+if grep -q 'BEGIN CERTIFICATE' /tmp/unknown-sni; then
+    echo "Expected unknown HTTPS host to reject the handshake"
+    exit 1
+fi
+timeout 5 openssl s_client -connect 127.0.0.1:443 -servername monitor.example.test </dev/null >/tmp/known-sni 2>&1 || true
+grep -q 'monitor.example.test' /tmp/known-sni
+rm -f /tmp/unknown-sni /tmp/known-sni
 grep -q 'http://127.0.0.1:9090' /etc/grafana/provisioning/datasources/server-tool.yaml
 grep -q 'http://127.0.0.1:3100' /etc/grafana/provisioning/datasources/server-tool.yaml
 grep -q 'server-tools-server' /var/lib/grafana/dashboards/server-tools/server.json
@@ -764,6 +824,14 @@ grep -qxF '# nginx-http-port: 80' /home/testdev/demo/nginx/demo.conf
 grep -qxF '    listen 80;' /home/testdev/demo/nginx/demo.conf
 grep -qxF '    listen [::]:80;' /home/testdev/demo/nginx/demo.conf
 grep -qF 'location ~ ^/index\.php(/|$) {' /home/testdev/demo/nginx/demo.conf
+demo_body="$(mktemp)"
+demo_code="$(curl -sS -o "$demo_body" -w '%{http_code}' -H 'Host: demo' http://127.0.0.1/)"
+[[ "$demo_code" == "200" ]]
+grep -q 'phpinfo' "$demo_body"
+unknown_code="$(curl -sS -o "$demo_body" -w '%{http_code}' -H 'Host: unknown.example' http://127.0.0.1/)"
+[[ "$unknown_code" == "500" ]]
+grep -qF 'No active host found' "$demo_body"
+rm -f "$demo_body"
 if grep -q 'fastcgi_split_path_info' /home/testdev/demo/nginx/demo.conf; then
     echo "Expected the default nginx config to omit fastcgi_split_path_info"
     exit 1
@@ -792,6 +860,7 @@ test "$(verbose_app_field testdev demo SCHEDULER)" = off
 test "$(verbose_app_field testdev demo WORKERS)" = off
 [[ "$(server-tool status | awk 'NR==1')" == "SSH password login: disabled" ]]
 server-tool status | grep -qF "PHP ${php_version} FPM: session.upload_progress.enabled = Off"
+server-tool status | grep -qF "Default host *:80: explicit"
 [[ "$(server-tool status | awk '$1=="testdev" && $2=="demo" {print $3}')" == "strict" ]]
 getfacl /home/testdev/demo/log | grep -q 'user:alloy:r-x'
 if grep -q 'demo.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json; then
@@ -1010,6 +1079,11 @@ grep -qxF '/up' /home/testdev/demo/nginx/auth-except
 echo "==> enable-ssl testdev demo --self-signed"
 server-tool enable-ssl testdev demo -d demo.example.test --self-signed -y
 grep -q "listen 443 ssl" /home/testdev/demo/nginx/demo.conf
+if grep -q 'listen 443 ssl default_server' /home/testdev/demo/nginx/demo.conf; then
+    echo "Expected the application not to become the default https server"
+    exit 1
+fi
+grep -q 'ssl_reject_handshake on;' /etc/nginx/conf.d/00-server-tool-default-host.conf
 test -f /home/testdev/demo/nginx/ssl/demo.example.test.pem
 test -f /home/testdev/demo/nginx/ssl/demo.example.test.key
 grep -q "return 301 https" /home/testdev/demo/nginx/demo.conf

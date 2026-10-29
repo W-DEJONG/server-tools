@@ -38,6 +38,7 @@ command_summary() {
     apply-cron) echo "Apply an application's cron directory to the user's crontab" ;;
     backup-app) echo "Back up an application to S3, or enable/disable its daily cron" ;;
     check-certbot-renew) echo "Check certbot auto-renew and enable it if it is inactive" ;;
+    check-default-host) echo "Check the nginx default host, and create one unless --check is set" ;;
     check-php-upload-progress) echo "Check PHP-FPM session upload progress, and disable it unless --check is set" ;;
     create-app) echo "Create a web application layout, nginx vhost, and php-fpm pool" ;;
     create-db) echo "Create a PostgreSQL or MySQL database and matching user" ;;
@@ -72,7 +73,7 @@ command_summary() {
     show-ssh-key) echo "Print an application user's private SSH key as base64" ;;
     start-horizon) echo "Start an application's Laravel Horizon Supervisor program" ;;
     start-queue) echo "Start an application's Laravel queue Supervisor program" ;;
-    status) echo "Show SSH password login, PHP upload progress, and a verbose application overview" ;;
+    status) echo "Show SSH password login, PHP upload progress, the nginx default host, and a verbose application overview" ;;
     stop-horizon) echo "Stop an application's Laravel Horizon Supervisor program" ;;
     stop-queue) echo "Stop an application's Laravel queue Supervisor program" ;;
     switch-nginx) echo "Switch an application's nginx PHP mode between strict and legacy" ;;
@@ -709,6 +710,36 @@ Examples:
   server-tool check-certbot-renew -y
 EOF
       ;;
+    check-default-host)
+      cat <<'EOF'
+check-default-host
+
+Check that every nginx listen socket has an explicit default_server.
+--check only prints the result and exits with an error when a socket
+has none. Nothing is written or reloaded.
+
+Without --check, sockets that have no default_server are added to
+
+  /etc/nginx/conf.d/00-server-tool-default-host.conf
+
+Unknown HTTP hosts return 500 and the page "No active host found".
+Unknown HTTPS hosts reject the TLS handshake. A socket that already
+has default_server is left unchanged. You are asked before nginx is
+changed.
+
+Usage:
+  server-tool check-default-host [--check] [-y]
+
+Options:
+  --check        Report the default host and do not change it
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool check-default-host --check
+  server-tool check-default-host
+  server-tool check-default-host -y
+EOF
+      ;;
     check-php-upload-progress)
       cat <<'EOF'
 check-php-upload-progress
@@ -1139,7 +1170,8 @@ EOF
 status
 
 Show whether SSH password login is enabled, whether PHP-FPM session
-upload progress is off, then the verbose application list.
+upload progress is off, whether every nginx listen socket has an
+explicit default host, then the verbose application list.
 
 Password login is disabled only when sshd's effective configuration has
 both passwordauthentication and kbdinteractiveauthentication set to no.
@@ -1147,6 +1179,10 @@ The upload-progress lines are the same check as
 server-tool check-php-upload-progress --check. Nothing is changed.
 Status exits with an error when that setting is still on.
 Without PHP-FPM, status reports that and continues.
+The default-host lines are the same check as
+server-tool check-default-host --check. Nothing is changed.
+Status exits with an error when a listen socket has no default_server.
+Without nginx, status reports that and continues.
 The application table is the same as list-apps -v.
 
 Usage:
@@ -1588,6 +1624,11 @@ EOF
 install nginx
 
 Install nginx, certbot, and open HTTP/HTTPS in ufw.
+
+Also installs a default host for listen sockets that have no
+default_server. Unknown HTTP hosts return 500 with "No active host
+found". Unknown HTTPS hosts reject the TLS handshake. Sockets added
+later are covered by server-tool check-default-host.
 
 Usage:
   server-tool install nginx [-y]
