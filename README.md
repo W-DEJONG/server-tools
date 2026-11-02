@@ -64,6 +64,9 @@ server-tool install postgresql -y 17 18
 server-tool install memcached
 server-tool install redis
 server-tool install meilisearch
+# k6 v0.55.0 with the AMQP module, installed as /usr/local/bin/k6-amqp
+server-tool install k6
+server-tool install k6 -y
 server-tool install monitoring -d grafana.example.com -e admin@example.com
 server-tool install monitoring -d grafana.example.com -e admin@example.com -y
 server-tool install alloy --url https://grafana.example.com --api-key-file /root/monitoring-api.key

@@ -1454,6 +1454,7 @@ Examples:
   server-tool install php -y 8.4 8.5
   server-tool install npm -y 22 24
   server-tool install composer --version 2.8.12
+  server-tool install k6 -y
   server-tool install aws my-backups -y
   server-tool install postgresql redis php 8.4 -y
   server-tool install monitoring -d grafana.example.com -e admin@example.com -y
@@ -1521,6 +1522,27 @@ Options:
 Examples:
   server-tool install composer -y
   server-tool install composer --version 2.8.12
+EOF
+      ;;
+    k6)
+      cat <<'EOF'
+install k6
+
+Build k6 v0.55.0 with the AMQP module and install it as
+/usr/local/bin/k6-amqp.
+
+Go 1.26.8 is installed under /usr/local/go when Go is missing or older.
+An existing Go that is 1.26.8 or newer is left in place.
+
+Usage:
+  server-tool install k6 [-y]
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool install k6
+  server-tool install k6 -y
 EOF
       ;;
     mariadb-client)

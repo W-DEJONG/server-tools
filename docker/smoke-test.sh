@@ -106,6 +106,7 @@ server-tool help check-default-host | grep -q 'Usage:'
 server-tool help check-default-host | grep -q -- '--check'
 server-tool help status | grep -q 'default host'
 server-tool help install nginx | grep -q 'default host'
+server-tool help install k6 | grep -q 'k6-amqp'
 server-tool help update-probes | grep -q 'Usage:'
 if server-tool update-grafana -y; then
     echo "Expected update-grafana to fail before monitoring is installed"
@@ -677,6 +678,13 @@ server-tool install memcached -y
 
 echo "==> install redis"
 server-tool install redis -y
+
+echo "==> install k6"
+server-tool install k6 -y
+test -x /usr/local/bin/k6-amqp
+k6-amqp version | grep -q 'v0.55.0'
+k6-amqp version | grep -q 'xk6-amqp-modern'
+sha256sum /usr/local/bin/k6-amqp
 
 echo "==> install meilisearch"
 server-tool install meilisearch -y

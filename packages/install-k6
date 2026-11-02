@@ -1,0 +1,166 @@
+#!/bin/bash
+set -eo pipefail
+
+# shellcheck disable=SC1091
+source "$SERVER_TOOL_ROOT/lib/common"
+
+usage="Usage: server-tool install k6 [-y]"
+if [ $# -gt 0 ]; then
+  echo "Error: unknown argument '$1'."
+  echo "$usage"
+  exit 1
+fi
+
+# xk6 v1.4.14 requires Go 1.26.8 (toolchain go1.26.8).
+GO_VERSION="1.26.8"
+XK6_VERSION="v1.4.14"
+K6_VERSION="v0.55.0"
+AMQP_MODULE="github.com/mario15390/xk6-amqp-modern@4f0f064081f63a2fc4469249b70635fc7a821173"
+K6_BIN="/usr/local/bin/k6-amqp"
+
+if [ -x "$K6_BIN" ]; then
+  confirm_or_exit "This will rebuild k6 ${K6_VERSION} with the AMQP module and replace ${K6_BIN}. Do you want to proceed? (y/n): "
+else
+  confirm_or_exit "This will install k6 ${K6_VERSION} with the AMQP module as ${K6_BIN}. Do you want to proceed? (y/n): "
+fi
+
+go_release_version() {
+  local raw="$1"
+  if [[ "$raw" =~ go([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  return 1
+}
+
+version_ge() {
+  local actual="$1"
+  local minimum="$2"
+  local sorted oldest
+  # sort must finish. Piping to head -n1 can SIGPIPE under pipefail.
+  sorted="$(printf '%s\n%s\n' "$minimum" "$actual" | sort -V)"
+  oldest="${sorted%%$'\n'*}"
+  [ "$oldest" = "$minimum" ]
+}
+
+go_is_new_enough() {
+  local bin="$1"
+  local raw ver
+  raw="$("$bin" version 2>/dev/null || true)"
+  ver="$(go_release_version "$raw" || true)"
+  [ -n "$ver" ] || return 1
+  version_ge "$ver" "$GO_VERSION"
+}
+
+install_go() {
+  local arch goarch checksum tarball actual tmpdir
+
+  arch="$(debian_arch)"
+  case "$arch" in
+    amd64)
+      goarch="amd64"
+      checksum="d0f743b33e8d8945e6b1f432edd15785c70507121d6e2a723b21285eddf8b57b"
+      ;;
+    arm64)
+      goarch="arm64"
+      checksum="211ffced9dcb9633a55eac6364816ec0ddd951389a740e88fa8b3337971bdda0"
+      ;;
+    *)
+      echo "Error: Go is only installed for amd64 and arm64. Detected: $arch"
+      exit 1
+      ;;
+  esac
+
+  tarball="go${GO_VERSION}.linux-${goarch}.tar.gz"
+  tmpdir="$(mktemp -d -p /var/tmp)"
+  echo "Downloading ${tarball}..."
+  if ! curl -fsSL -o "$tmpdir/$tarball" "https://go.dev/dl/${tarball}"; then
+    rm -rf "$tmpdir"
+    echo "Error: failed to download ${tarball}."
+    exit 1
+  fi
+  actual="$(sha256sum "$tmpdir/$tarball" | awk '{print $1}')"
+  if [ "$actual" != "$checksum" ]; then
+    rm -rf "$tmpdir"
+    echo "Error: checksum mismatch for ${tarball}."
+    exit 1
+  fi
+
+  rm -rf /usr/local/go
+  tar -C /usr/local -xzf "$tmpdir/$tarball"
+  rm -rf "$tmpdir"
+  echo "Installed Go ${GO_VERSION} to /usr/local/go."
+}
+
+echo "Installing build dependencies..."
+apt_get -y install ca-certificates curl git
+
+GO_BIN=""
+if command -v go >/dev/null 2>&1; then
+  GO_BIN="$(command -v go)"
+fi
+
+if [ -n "$GO_BIN" ] && go_is_new_enough "$GO_BIN"; then
+  echo "Using Go $(go_release_version "$("$GO_BIN" version)") (${GO_BIN})."
+elif [ -x /usr/local/go/bin/go ] && go_is_new_enough /usr/local/go/bin/go; then
+  GO_BIN="/usr/local/go/bin/go"
+  echo "Using Go $(go_release_version "$("$GO_BIN" version)") (${GO_BIN})."
+else
+  if [ -n "$GO_BIN" ]; then
+    echo "Go at ${GO_BIN} is older than ${GO_VERSION}."
+  else
+    echo "Go is not installed."
+  fi
+  install_go
+  GO_BIN="/usr/local/go/bin/go"
+fi
+
+workdir="$(mktemp -d -p /var/tmp)"
+cleanup_k6_build() {
+  rm -rf "$workdir"
+}
+trap cleanup_k6_build EXIT
+
+export PATH="$(dirname "$GO_BIN"):$PATH"
+export CGO_ENABLED=0
+export GOTOOLCHAIN=local
+export GOPATH="$workdir/gopath"
+export GOCACHE="$workdir/cache"
+export GOMODCACHE="$workdir/mod"
+export GOBIN="$workdir/bin"
+mkdir -p "$GOBIN"
+
+echo "Installing xk6 ${XK6_VERSION}..."
+go install "go.k6.io/xk6/cmd/xk6@${XK6_VERSION}"
+
+echo "Building k6 ${K6_VERSION} with the AMQP module..."
+(
+  cd "$workdir"
+  "$GOBIN/xk6" build "$K6_VERSION" \
+    --with "$AMQP_MODULE" \
+    --output k6-amqp
+)
+
+install -m 0755 "$workdir/k6-amqp" "$K6_BIN"
+
+version_out="$("$K6_BIN" version 2>&1 || true)"
+printf '%s\n' "$version_out"
+case "$version_out" in
+  *"$K6_VERSION"*) ;;
+  *)
+    echo "Error: expected k6 ${K6_VERSION}."
+    exit 1
+    ;;
+esac
+case "$version_out" in
+  *xk6-amqp-modern*) ;;
+  *)
+    echo "Error: built k6 is missing the AMQP module."
+    exit 1
+    ;;
+esac
+
+echo
+echo "k6 is ready."
+echo "  Binary: $K6_BIN"
+sha256sum "$K6_BIN"
