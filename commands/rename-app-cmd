@@ -226,7 +226,7 @@ fi
 
 old_auth_var="$(auth_basic_var_name "$username" "$old_app")"
 new_auth_var="$(auth_basic_var_name "$username" "$new_app")"
-for file in "$new_root/nginx/auth.inc" "$new_root/nginx/auth-map.conf"; do
+for file in "$new_root/nginx/auth.inc" "$new_root/nginx/auth.inc.enabled" "$new_root/nginx/auth-map.conf"; do
   if [ -f "$file" ]; then
     sed -i \
       -e "s|${old_root}|${new_root}|g" \

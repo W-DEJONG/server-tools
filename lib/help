@@ -79,6 +79,7 @@ command_summary() {
     switch-nginx) echo "Switch an application's nginx PHP mode between strict and legacy" ;;
     switch-php) echo "Switch an application to another PHP version" ;;
     test-backup) echo "Upload a small test object to verify S3 backup config" ;;
+    toggle-basic-auth) echo "Turn HTTP basic authentication off or on without dropping users or exceptions" ;;
     update-grafana) echo "Replace the shipped Grafana dashboards and install the backup, disk, CPU and memory alerts" ;;
     update-monitoring) echo "Refresh Prometheus retention and Loki config without reinstalling monitoring" ;;
     update-php) echo "Upgrade every installed PHP version to the latest patch" ;;
@@ -140,6 +141,7 @@ Folder layout
 
 Optional files after other commands:
   nginx/.htpasswd         HTTP basic auth users (enable-basic-auth)
+  nginx/auth.inc.enabled  Saved basic auth config (toggle-basic-auth)
   nginx/auth-map.conf     Paths that skip basic auth (--except)
   nginx/auth-except       Stored --except paths
   cron/scheduler          Laravel schedule:run (enable-scheduler)
@@ -645,7 +647,8 @@ enable-basic-auth
 Enable HTTP basic authentication on an application.
 
 Repeat --except to skip multiple paths. Paths already stored for the app
-are kept when --except is omitted.
+are kept when --except is omitted. Turn it off later with toggle-basic-auth
+without dropping users, the realm, or those paths.
 
 Usage:
   server-tool enable-basic-auth <username> <application> <auth_user> [options] [-y]
@@ -663,6 +666,30 @@ Options:
 Examples:
   server-tool enable-basic-auth testdev demo tester -y
   server-tool enable-basic-auth testdev demo tester -r Staging --except /webhooks --except /up -y
+EOF
+      ;;
+    toggle-basic-auth)
+      cat <<'EOF'
+toggle-basic-auth
+
+Turn HTTP basic authentication off or on for an application.
+
+Off keeps the htpasswd users, the realm, and any --except paths.
+On restores that saved nginx config and does not change passwords.
+Set basic auth up first with enable-basic-auth.
+
+Usage:
+  server-tool toggle-basic-auth <username> <application> [-y]
+
+Arguments:
+  username       Linux user that owns the application
+  application    Application folder under /home/<username>/
+
+Options:
+  -y, --yes      Skip confirmation prompts
+
+Examples:
+  server-tool toggle-basic-auth testdev demo -y
 EOF
       ;;
     enable-scheduler)

@@ -116,6 +116,8 @@ server-tool remove-domain <username> <application> <domain> [-y]
 server-tool check-certbot-renew [-y]
 server-tool enable-basic-auth <username> <application> <auth_user> [-r <realm>] [--except <path>] [-y]
 server-tool enable-basic-auth testdev demo tester -r Staging --except /webhooks --except /up -y
+server-tool toggle-basic-auth <username> <application> [-y]
+server-tool toggle-basic-auth testdev demo -y
 server-tool disable-ssh-password [-y]
 server-tool create-horizon <username> <application> [-p <php-version>] [-n <numprocs>] [-y]
 server-tool start-horizon <username> <application> [--restart] [-y]

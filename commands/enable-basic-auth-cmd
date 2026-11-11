@@ -204,7 +204,8 @@ else
 fi
 
 write_basic_auth_files "$realm" "$htpasswd_file" "$auth_inc" "$auth_map" "$auth_var" "${excepts[@]}"
-chown "$username:$username" "$auth_inc"
+cp "$auth_inc" "$APP_ROOT/nginx/auth.inc.enabled"
+chown "$username:$username" "$auth_inc" "$APP_ROOT/nginx/auth.inc.enabled"
 if [ -f "$auth_map" ]; then
   chown "$username:$username" "$auth_map"
 fi

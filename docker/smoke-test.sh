@@ -1061,9 +1061,16 @@ if server-tool list-horizons definitely-not-a-user; then
     exit 1
 fi
 
+echo "==> toggle-basic-auth fails before basic auth is configured"
+if server-tool toggle-basic-auth testdev demo -y; then
+    echo "Expected toggle-basic-auth to fail when basic auth is not configured"
+    exit 1
+fi
+
 echo "==> enable-basic-auth testdev demo tester"
 server-tool enable-basic-auth testdev demo tester -r Staging -y
 grep -q 'auth_basic "Staging"' /home/testdev/demo/nginx/auth.inc
+grep -q 'auth_basic "Staging"' /home/testdev/demo/nginx/auth.inc.enabled
 test ! -e /home/testdev/demo/nginx/auth-map.conf
 test -s /home/testdev/demo/nginx/.htpasswd
 test "$(verbose_app_field testdev demo AUTH)" = on
@@ -1071,6 +1078,7 @@ test "$(verbose_app_field testdev demo AUTH)" = on
 echo "==> enable-basic-auth testdev demo tester --except"
 server-tool enable-basic-auth testdev demo tester -r Staging --except /webhooks --except /up -y
 grep -q 'auth_basic $auth_basic_testdev_demo' /home/testdev/demo/nginx/auth.inc
+grep -q 'auth_basic $auth_basic_testdev_demo' /home/testdev/demo/nginx/auth.inc.enabled
 grep -q 'default "Staging"' /home/testdev/demo/nginx/auth-map.conf
 grep -qF '~^/webhooks(/|\?|$)' /home/testdev/demo/nginx/auth-map.conf
 grep -qF '~^/up(/|\?|$)' /home/testdev/demo/nginx/auth-map.conf
@@ -1083,6 +1091,30 @@ grep -q 'auth_basic $auth_basic_testdev_demo' /home/testdev/demo/nginx/auth.inc
 grep -qF '~^/webhooks(/|\?|$)' /home/testdev/demo/nginx/auth-map.conf
 grep -qxF '/webhooks' /home/testdev/demo/nginx/auth-except
 grep -qxF '/up' /home/testdev/demo/nginx/auth-except
+
+echo "==> toggle-basic-auth disables without dropping logins or exceptions"
+htpasswd_checksum="$(sha256sum /home/testdev/demo/nginx/.htpasswd | awk '{print $1}')"
+server-tool toggle-basic-auth testdev demo -y
+test ! -s /home/testdev/demo/nginx/auth.inc
+grep -q 'auth_basic $auth_basic_testdev_demo' /home/testdev/demo/nginx/auth.inc.enabled
+grep -q '/home/testdev/demo/nginx/.htpasswd' /home/testdev/demo/nginx/auth.inc.enabled
+test "$(sha256sum /home/testdev/demo/nginx/.htpasswd | awk '{print $1}')" = "$htpasswd_checksum"
+grep -q 'default "Staging"' /home/testdev/demo/nginx/auth-map.conf
+grep -qF '~^/webhooks(/|\?|$)' /home/testdev/demo/nginx/auth-map.conf
+grep -qF '~^/up(/|\?|$)' /home/testdev/demo/nginx/auth-map.conf
+grep -qxF '/webhooks' /home/testdev/demo/nginx/auth-except
+grep -qxF '/up' /home/testdev/demo/nginx/auth-except
+test "$(verbose_app_field testdev demo AUTH)" = off
+
+echo "==> toggle-basic-auth enables the saved basic auth config"
+server-tool toggle-basic-auth testdev demo -y
+grep -q 'auth_basic $auth_basic_testdev_demo' /home/testdev/demo/nginx/auth.inc
+grep -q '/home/testdev/demo/nginx/.htpasswd' /home/testdev/demo/nginx/auth.inc
+test "$(sha256sum /home/testdev/demo/nginx/.htpasswd | awk '{print $1}')" = "$htpasswd_checksum"
+grep -q 'default "Staging"' /home/testdev/demo/nginx/auth-map.conf
+grep -qxF '/webhooks' /home/testdev/demo/nginx/auth-except
+grep -qxF '/up' /home/testdev/demo/nginx/auth-except
+test "$(verbose_app_field testdev demo AUTH)" = on
 
 echo "==> enable-ssl testdev demo --self-signed"
 server-tool enable-ssl testdev demo -d demo.example.test --self-signed -y
@@ -1272,6 +1304,8 @@ test -f /home/testdev/demo2/.env.db
 grep -q '^DB_DATABASE=dump_testdb' /home/testdev/demo2/.env.db
 grep -q 'auth_basic $auth_basic_testdev_demo2' /home/testdev/demo2/nginx/auth.inc
 grep -q '/home/testdev/demo2/nginx/.htpasswd' /home/testdev/demo2/nginx/auth.inc
+grep -q 'auth_basic $auth_basic_testdev_demo2' /home/testdev/demo2/nginx/auth.inc.enabled
+grep -q '/home/testdev/demo2/nginx/.htpasswd' /home/testdev/demo2/nginx/auth.inc.enabled
 grep -q 'default "Staging"' /home/testdev/demo2/nginx/auth-map.conf
 grep -qF '~^/webhooks(/|\?|$)' /home/testdev/demo2/nginx/auth-map.conf
 grep -qF '~^/up(/|\?|$)' /home/testdev/demo2/nginx/auth-map.conf
@@ -1351,6 +1385,8 @@ test -f /home/testdev/demo2/nginx/ssl/demo.example.test.pem
 test -f /home/testdev/demo2/nginx/ssl/demo.example.test.key
 grep -q 'auth_basic $auth_basic_testdev_demo2' /home/testdev/demo2/nginx/auth.inc
 grep -q '/home/testdev/demo2/nginx/.htpasswd' /home/testdev/demo2/nginx/auth.inc
+grep -q 'auth_basic $auth_basic_testdev_demo2' /home/testdev/demo2/nginx/auth.inc.enabled
+grep -q '/home/testdev/demo2/nginx/.htpasswd' /home/testdev/demo2/nginx/auth.inc.enabled
 grep -q 'default "Staging"' /home/testdev/demo2/nginx/auth-map.conf
 grep -qF '~^/webhooks(/|\?|$)' /home/testdev/demo2/nginx/auth-map.conf
 grep -qF '~^/up(/|\?|$)' /home/testdev/demo2/nginx/auth-map.conf

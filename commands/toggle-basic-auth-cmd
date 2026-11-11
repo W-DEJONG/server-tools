@@ -1,0 +1,62 @@
+#!/bin/bash
+set -eo pipefail
+
+if [ $# -ne 2 ]; then
+  echo "Usage: server-tool toggle-basic-auth <username> <application> [-y]"
+  exit 1
+fi
+
+username="$1"
+app_name="$2"
+require_application "$username" "$app_name"
+
+auth_inc="$APP_ROOT/nginx/auth.inc"
+auth_saved="$APP_ROOT/nginx/auth.inc.enabled"
+auth_map="$APP_ROOT/nginx/auth-map.conf"
+htpasswd_file="$APP_ROOT/nginx/.htpasswd"
+except_file="$APP_ROOT/nginx/auth-except"
+enabled="$(app_auth_column "$auth_inc")"
+
+if [ "$enabled" = off ]; then
+  if [ ! -s "$auth_saved" ] || ! grep -q 'auth_basic' "$auth_saved"; then
+    echo "Error: basic auth has not been set up for $app_name. Run enable-basic-auth first."
+    exit 1
+  fi
+  if [ ! -s "$htpasswd_file" ]; then
+    echo "Error: saved basic auth users are missing ($htpasswd_file)."
+    exit 1
+  fi
+  if grep -q 'auth_basic \$' "$auth_saved" && [ ! -f "$auth_map" ]; then
+    echo "Error: saved basic auth exceptions are missing ($auth_map)."
+    exit 1
+  fi
+fi
+
+echo "Username: $username"
+echo "Application: $app_name"
+echo "Basic auth: $enabled"
+if [ "$enabled" = on ]; then
+  confirm_or_exit "This will disable HTTP basic auth for $app_name. Logins and exceptions are kept. Do you want to proceed? (y/n): "
+  cp "$auth_inc" "$auth_saved"
+  chown "$username:$username" "$auth_saved"
+  : > "$auth_inc"
+  chown "$username:$username" "$auth_inc"
+  reload_nginx
+  echo
+  echo "Basic auth is disabled."
+  echo "  Users: $htpasswd_file"
+  echo "  Saved: $auth_saved"
+else
+  confirm_or_exit "This will enable HTTP basic auth for $app_name using the saved logins and exceptions. Do you want to proceed? (y/n): "
+  cp "$auth_saved" "$auth_inc"
+  chown "$username:$username" "$auth_inc"
+  reload_nginx
+  echo
+  echo "Basic auth is enabled."
+  echo "  Config: $auth_inc"
+  echo "  Users:  $htpasswd_file"
+fi
+
+if [ -s "$except_file" ]; then
+  echo "  Except: $(tr '\n' ' ' < "$except_file" | sed 's/ *$//')"
+fi
