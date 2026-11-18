@@ -104,12 +104,23 @@ ssl_cert="$ssl_dir/${domain}.pem"
 ssl_key="$ssl_dir/${domain}.key"
 mkdir -p "$ssl_dir"
 
+certificate_name_list() {
+  local names="$domain" name
+  for name in $(certificate_names_for "$server_names" "$APP_ROOT"); do
+    names="$(append_unique_name "$names" "$name")"
+  done
+  if [ -z "$names" ]; then
+    names="$domain"
+  fi
+  printf '%s\n' "$names"
+}
+
 create_self_signed_cert() {
+  local names
+  names="$(certificate_name_list)"
   echo "Creating self-signed certificate..."
-  openssl req -x509 -nodes -days $((365 * 15)) -newkey rsa:2048 \
-    -keyout "$ssl_key" \
-    -out "$ssl_cert" \
-    -subj "/CN=${domain}"
+  # shellcheck disable=SC2086
+  write_self_signed_certificate "$ssl_cert" "$ssl_key" $names
 }
 
 request_letsencrypt_cert() {
@@ -118,10 +129,8 @@ request_letsencrypt_cert() {
   if [ "$force_renewal" -eq 1 ]; then
     mode="replace"
   fi
-  local names="$server_names"
-  if [ -z "$names" ]; then
-    names="$domain"
-  fi
+  local names
+  names="$(certificate_name_list)"
   # shellcheck disable=SC2086
   request_letsencrypt_names "$domain" "$APP_ROOT/current/public" "$mode" "$email" $names
   copy_letsencrypt_to_app "$domain" "$ssl_cert" "$ssl_key"
@@ -221,7 +230,7 @@ if [ "$already_ssl" -eq 1 ]; then
   replaced_self_signed=1
 else
   if [ "$self_signed" -eq 1 ]; then
-    if [ ! -f "$ssl_cert" ] || [ ! -f "$ssl_key" ]; then
+    if [ ! -f "$ssl_cert" ] || [ ! -f "$ssl_key" ] || [ -n "$(app_redirect_sources "$APP_ROOT")" ]; then
       create_self_signed_cert
     else
       echo "Using existing certificate files in $ssl_dir"
@@ -246,6 +255,7 @@ else
     "$ssl_cert" \
     "$ssl_key"
   chown "$username:$username" "$APP_NGINX_CONF"
+  render_app_redirects_conf "$APP_ROOT" "$APP_NGINX_CONF" "$username"
 fi
 
 reload_nginx

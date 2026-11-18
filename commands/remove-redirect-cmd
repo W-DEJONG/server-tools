@@ -1,0 +1,39 @@
+#!/bin/bash
+set -eo pipefail
+
+usage="Usage: server-tool remove-redirect <username> <application> <from> [-y]"
+if [ $# -ne 3 ]; then
+  echo "$usage"
+  exit 1
+fi
+
+username="$1"
+app_name="$2"
+from="$3"
+require_application "$username" "$app_name"
+require_valid_domain "$from"
+
+if ! app_redirect_target "$APP_ROOT" "$from" >/dev/null; then
+  echo "Error: domain '$from' is not a redirect for $username/$app_name."
+  exit 1
+fi
+
+echo "Username: $username"
+echo "Application: $app_name"
+echo "Remove redirect: $from"
+confirm_or_exit "This will remove the redirect from '$from' for $username/$app_name. Do you want to proceed? (y/n): "
+
+remove_app_redirect "$APP_ROOT" "$username" "$from"
+render_app_redirects_conf "$APP_ROOT" "$APP_NGINX_CONF" "$username"
+reload_nginx
+
+if grep -q 'listen 443' "$APP_NGINX_CONF"; then
+  refresh_app_certificate "$username" "$app_name" "$APP_ROOT" "$APP_NGINX_CONF" replace ""
+  reload_nginx
+fi
+
+sync_app_monitoring "$username" "$app_name"
+
+echo
+echo "Redirect removed."
+echo "  From: $from"

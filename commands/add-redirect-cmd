@@ -1,0 +1,128 @@
+#!/bin/bash
+set -eo pipefail
+
+www_mode=""
+positionals=()
+usage="Usage: server-tool add-redirect <username> <application> <from> <to> [-y]
+       server-tool add-redirect <username> <application> --www <apex> [-y]
+       server-tool add-redirect <username> <application> --to-www <apex> [-y]"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --www)
+      if [ -n "$www_mode" ]; then
+        echo "Error: use only one of --www or --to-www."
+        echo "$usage"
+        exit 1
+      fi
+      www_mode="www"
+      shift
+      ;;
+    --to-www)
+      if [ -n "$www_mode" ]; then
+        echo "Error: use only one of --www or --to-www."
+        echo "$usage"
+        exit 1
+      fi
+      www_mode="to-www"
+      shift
+      ;;
+    *)
+      positionals+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ -n "$www_mode" ]; then
+  if [ ${#positionals[@]} -ne 3 ]; then
+    echo "$usage"
+    exit 1
+  fi
+  username="${positionals[0]}"
+  app_name="${positionals[1]}"
+  apex="${positionals[2]}"
+  require_valid_domain "$apex"
+  case "$apex" in
+    www.*)
+      echo "Error: pass the apex domain to --${www_mode}, not '$apex'."
+      exit 1
+      ;;
+  esac
+  if [ "$www_mode" = "www" ]; then
+    from="www.${apex}"
+    to="$apex"
+  else
+    from="$apex"
+    to="www.${apex}"
+  fi
+else
+  if [ ${#positionals[@]} -ne 4 ]; then
+    echo "$usage"
+    exit 1
+  fi
+  username="${positionals[0]}"
+  app_name="${positionals[1]}"
+  from="${positionals[2]}"
+  to="${positionals[3]}"
+fi
+
+require_application "$username" "$app_name"
+require_valid_domain "$from"
+require_valid_domain "$to"
+
+if [ "$from" = "$to" ]; then
+  echo "Error: redirect source and target must be different."
+  exit 1
+fi
+
+if app_redirect_target "$APP_ROOT" "$from" >/dev/null; then
+  echo "Error: domain '$from' already redirects for $username/$app_name."
+  exit 1
+fi
+
+serving="$(app_server_names_from_nginx "$APP_NGINX_CONF")"
+ensure_target=0
+if [ "$www_mode" = "to-www" ]; then
+  ensure_target=1
+fi
+
+remaining="$serving"
+if name_is_in_list "$from" "$remaining"; then
+  remaining="$(remove_name_from_list "$remaining" "$from")"
+fi
+if [ "$ensure_target" -eq 1 ]; then
+  remaining="$(append_unique_name "$remaining" "$to")"
+fi
+if name_is_in_list "$from" "$serving" && [ -z "$remaining" ]; then
+  echo "Error: refusing to redirect the last served domain '$from' for $username/$app_name."
+  exit 1
+fi
+
+echo "Username: $username"
+echo "Application: $app_name"
+echo "Redirect: $from -> $to"
+if [ "$remaining" != "$serving" ]; then
+  echo "Server names: $remaining"
+fi
+confirm_or_exit "This will redirect '$from' to '$to' for $username/$app_name. Do you want to proceed? (y/n): "
+
+if [ "$remaining" != "$serving" ]; then
+  set_nginx_server_names "$APP_NGINX_CONF" "$remaining"
+  chown "$username:$username" "$APP_NGINX_CONF"
+fi
+
+add_app_redirect "$APP_ROOT" "$username" "$from" "$to"
+render_app_redirects_conf "$APP_ROOT" "$APP_NGINX_CONF" "$username"
+reload_nginx
+
+if grep -q 'listen 443' "$APP_NGINX_CONF"; then
+  refresh_app_certificate "$username" "$app_name" "$APP_ROOT" "$APP_NGINX_CONF" expand ""
+  reload_nginx
+fi
+
+sync_app_monitoring "$username" "$app_name"
+
+echo
+echo "Redirect added."
+echo "  From: $from"
+echo "  To:   $to"

@@ -202,6 +202,7 @@ else
     "$server_name"
 fi
 chown "$username:$username" "$new_root/nginx/${new_app}.conf"
+render_app_redirects_conf "$new_root" "$new_root/nginx/${new_app}.conf" "$username"
 
 if [ -d "$new_root/supervisor" ]; then
   for file in "$new_root/supervisor/"*; do

@@ -40,8 +40,9 @@ if lineage="$(app_letsencrypt_lineage "$APP_NGINX_CONF")"; then
     echo "Error: Let's Encrypt is active but ssl_certificate paths were not found in $APP_NGINX_CONF"
     exit 1
   fi
+  cert_names="$(certificate_names_for "$new_names" "$APP_ROOT")"
   # shellcheck disable=SC2086
-  sync_app_letsencrypt_names "$username" "$app_name" "$APP_ROOT" "$lineage" "$ssl_cert" "$ssl_key" replace "" $new_names
+  sync_app_letsencrypt_names "$username" "$app_name" "$APP_ROOT" "$lineage" "$ssl_cert" "$ssl_key" replace "" $cert_names
 fi
 
 set_nginx_server_names "$APP_NGINX_CONF" "$new_names"

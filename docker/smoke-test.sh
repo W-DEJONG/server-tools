@@ -1116,6 +1116,16 @@ grep -qxF '/webhooks' /home/testdev/demo/nginx/auth-except
 grep -qxF '/up' /home/testdev/demo/nginx/auth-except
 test "$(verbose_app_field testdev demo AUTH)" = on
 
+echo "==> add-redirect www before HTTPS"
+server-tool add-redirect testdev demo --www demo.example.test -y
+grep -qF 'return 301 http://demo.example.test$request_uri;' /home/testdev/demo/nginx/redirects.conf
+grep -q 'location ^~ /.well-known/acme-challenge/' /home/testdev/demo/nginx/redirects.conf
+if grep -q 'listen 443' /home/testdev/demo/nginx/redirects.conf; then
+    echo "Expected an HTTP redirect before SSL is enabled"
+    exit 1
+fi
+server-tool list-redirects testdev demo | grep -qxF 'www.demo.example.test demo.example.test'
+
 echo "==> enable-ssl testdev demo --self-signed"
 server-tool enable-ssl testdev demo -d demo.example.test --self-signed -y
 grep -q "listen 443 ssl" /home/testdev/demo/nginx/demo.conf
@@ -1137,10 +1147,22 @@ test "$(verbose_app_field testdev demo SSL)" = self-signed
 
 grep -q 'https://demo.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json
 grep -q '"domain": "demo.example.test"' /var/lib/server-tool/monitoring/blackbox-targets.json
+grep -qF 'return 301 https://demo.example.test$request_uri;' /home/testdev/demo/nginx/redirects.conf
+grep -q 'listen 443 ssl;' /home/testdev/demo/nginx/redirects.conf
+if grep -qE 'server_name[[:space:]]+.*www\.demo\.example\.test' /home/testdev/demo/nginx/demo.conf; then
+    echo "Expected the www name to stay off the site vhost"
+    exit 1
+fi
+if grep -q 'www.demo.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json; then
+    echo "Expected redirect hosts to stay out of HTTP probes"
+    exit 1
+fi
+openssl x509 -in /home/testdev/demo/nginx/ssl/demo.example.test.pem -noout -ext subjectAltName | grep -q 'www.demo.example.test'
 
 echo "==> enable-ssl testdev demo --self-signed --renew"
 server-tool enable-ssl testdev demo -d demo.example.test --self-signed --renew -y
 openssl x509 -in /home/testdev/demo/nginx/ssl/demo.example.test.pem -noout -checkend $((86400 * 365 * 14))
+openssl x509 -in /home/testdev/demo/nginx/ssl/demo.example.test.pem -noout -ext subjectAltName | grep -q 'www.demo.example.test'
 
 echo "==> list-domains testdev demo"
 server-tool list-domains testdev demo | grep -qxF demo.example.test
@@ -1179,6 +1201,73 @@ server-tool list-domains testdev demo | grep -qxF demo.example.test
 grep -q 'https://demo.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json
 if grep -q 'extra.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json; then
     echo "Expected the removed domain to leave the HTTP probes"
+    exit 1
+fi
+
+echo "==> add-redirect duplicate and last served name are refused"
+if server-tool add-redirect testdev demo www.demo.example.test demo.example.test -y; then
+    echo "Expected duplicate add-redirect to fail"
+    exit 1
+fi
+if server-tool add-redirect testdev demo demo.example.test other.example.test -y; then
+    echo "Expected redirect of the last served domain to fail"
+    exit 1
+fi
+
+echo "==> add-redirect old.example.test to demo.example.test"
+server-tool add-redirect testdev demo old.example.test demo.example.test -y
+grep -q 'server_name old.example.test;' /home/testdev/demo/nginx/redirects.conf
+grep -qF 'return 301 https://demo.example.test$request_uri;' /home/testdev/demo/nginx/redirects.conf
+server-tool list-redirects testdev demo | grep -qxF 'old.example.test demo.example.test'
+if grep -q 'old.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json; then
+    echo "Expected redirect hosts to stay out of HTTP probes"
+    exit 1
+fi
+openssl x509 -in /home/testdev/demo/nginx/ssl/demo.example.test.pem -noout -ext subjectAltName | grep -q 'old.example.test'
+if server-tool add-domain testdev demo old.example.test -y; then
+    echo "Expected add-domain of a redirect source to fail"
+    exit 1
+fi
+
+echo "==> add-redirect --to-www extra.example.test"
+server-tool add-domain testdev demo extra.example.test -y
+server-tool add-redirect testdev demo --to-www extra.example.test -y
+server-tool list-domains testdev demo | grep -qxF www.extra.example.test
+if server-tool list-domains testdev demo | grep -qxF extra.example.test; then
+    echo "Expected the apex to leave the site vhost when redirecting to www"
+    exit 1
+fi
+server-tool list-redirects testdev demo | grep -qxF 'extra.example.test www.extra.example.test'
+grep -qE 'server_name[[:space:]]+.*www\.extra\.example\.test' /home/testdev/demo/nginx/demo.conf
+grep -q '"domain": "www.extra.example.test"' /var/lib/server-tool/monitoring/blackbox-targets.json
+if grep -q '"domain": "extra.example.test"' /var/lib/server-tool/monitoring/blackbox-targets.json; then
+    echo "Expected the redirected apex to leave the HTTP probes"
+    exit 1
+fi
+
+echo "==> remove-redirect"
+server-tool remove-redirect testdev demo www.demo.example.test -y
+server-tool remove-redirect testdev demo old.example.test -y
+server-tool remove-redirect testdev demo extra.example.test -y
+server-tool remove-domain testdev demo www.extra.example.test -y
+test ! -e /home/testdev/demo/nginx/redirects.conf
+test ! -e /home/testdev/demo/nginx/redirects.map
+test -z "$(server-tool list-redirects testdev demo)"
+server-tool list-domains testdev demo | grep -qxF demo.example.test
+if server-tool list-domains testdev demo | grep -qxF www.extra.example.test; then
+    echo "Expected the www target to be removed from the site"
+    exit 1
+fi
+if grep -q 'www.demo.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json; then
+    echo "Expected removed redirect hosts to stay out of HTTP probes"
+    exit 1
+fi
+if grep -q 'www.extra.example.test' /var/lib/server-tool/monitoring/blackbox-targets.json; then
+    echo "Expected the removed www target to leave the HTTP probes"
+    exit 1
+fi
+if server-tool remove-redirect testdev demo missing.example.test -y; then
+    echo "Expected remove-redirect for an unknown source to fail"
     exit 1
 fi
 

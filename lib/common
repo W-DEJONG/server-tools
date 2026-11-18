@@ -369,6 +369,48 @@ app_letsencrypt_lineage() {
   return 1
 }
 
+write_self_signed_certificate() {
+  local cert="$1"
+  local key="$2"
+  shift 2
+  local cn name san="" cnf
+
+  if [ $# -lt 1 ]; then
+    echo "Error: at least one name is required for a self-signed certificate."
+    exit 1
+  fi
+
+  cn="$1"
+  for name in "$@"; do
+    if [ -n "$san" ]; then
+      san="${san},DNS:${name}"
+    else
+      san="DNS:${name}"
+    fi
+  done
+
+  cnf="$(mktemp)"
+  cat > "$cnf" <<EOF
+[req]
+distinguished_name = req_distinguished_name
+x509_extensions = v3_req
+prompt = no
+[req_distinguished_name]
+CN = ${cn}
+[v3_req]
+subjectAltName = ${san}
+basicConstraints = CA:FALSE
+keyUsage = digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+EOF
+  openssl req -x509 -nodes -days $((365 * 15)) -newkey rsa:2048 \
+    -keyout "$key" \
+    -out "$cert" \
+    -config "$cnf" \
+    -extensions v3_req
+  rm -f "$cnf"
+}
+
 request_letsencrypt_names() {
   local lineage="$1"
   local webroot="$2"
@@ -562,6 +604,238 @@ render_nginx_app_conf() {
       -e "s|{{SSL_CERT}}|$ssl_cert|g" \
       -e "s|{{SSL_KEY}}|$ssl_key|g" \
       "$template" > "$dest"
+}
+
+app_redirects_map_path() {
+  printf '%s/nginx/redirects.map' "$1"
+}
+
+app_redirects_conf_path() {
+  printf '%s/nginx/redirects.conf' "$1"
+}
+
+read_app_redirects() {
+  local map="$1"
+  if [ ! -f "$map" ]; then
+    return 0
+  fi
+  awk '
+    /^[[:space:]]*(#|$)/ { next }
+    NF >= 2 { print $1, $2 }
+  ' "$map"
+}
+
+app_redirect_sources() {
+  local app_root="$1"
+  local from to sources=""
+  while read -r from to; do
+    [ -n "$from" ] || continue
+    sources="$(append_unique_name "$sources" "$from")"
+  done < <(read_app_redirects "$(app_redirects_map_path "$app_root")")
+  printf '%s\n' "$sources"
+}
+
+app_redirect_target() {
+  local app_root="$1"
+  local source="$2"
+  local from to
+  while read -r from to; do
+    if [ "$from" = "$source" ]; then
+      printf '%s\n' "$to"
+      return 0
+    fi
+  done < <(read_app_redirects "$(app_redirects_map_path "$app_root")")
+  return 1
+}
+
+certificate_names_for() {
+  local serving="$1"
+  local app_root="$2"
+  local names="$serving" source
+  for source in $(app_redirect_sources "$app_root"); do
+    names="$(append_unique_name "$names" "$source")"
+  done
+  printf '%s\n' "$names"
+}
+
+app_certificate_names() {
+  local conf="$1"
+  local app_root="$2"
+  certificate_names_for "$(app_server_names_from_nginx "$conf")" "$app_root"
+}
+
+redirect_request_origin() {
+  local scheme="$1"
+  local host="$2"
+  local http_port="$3"
+  if [ "$scheme" = "https" ]; then
+    printf 'https://%s' "$host"
+    return 0
+  fi
+  if [ "$http_port" = "80" ]; then
+    printf 'http://%s' "$host"
+  else
+    printf 'http://%s:%s' "$host" "$http_port"
+  fi
+}
+
+add_app_redirect() {
+  local app_root="$1"
+  local username="$2"
+  local from="$3"
+  local to="$4"
+  local map tmp
+  map="$(app_redirects_map_path "$app_root")"
+  tmp="$(mktemp)"
+  if [ -f "$map" ]; then
+    read_app_redirects "$map" > "$tmp"
+  fi
+  printf '%s %s\n' "$from" "$to" >> "$tmp"
+  mkdir -p "$(dirname "$map")"
+  mv "$tmp" "$map"
+  chown "$username:$username" "$map"
+}
+
+remove_app_redirect() {
+  local app_root="$1"
+  local username="$2"
+  local source="$3"
+  local map tmp from to kept=0
+  map="$(app_redirects_map_path "$app_root")"
+  tmp="$(mktemp)"
+  while read -r from to; do
+    [ -n "$from" ] || continue
+    if [ "$from" = "$source" ]; then
+      continue
+    fi
+    printf '%s %s\n' "$from" "$to" >> "$tmp"
+    kept=1
+  done < <(read_app_redirects "$map")
+  if [ "$kept" -eq 0 ]; then
+    rm -f "$tmp" "$map" "$(app_redirects_conf_path "$app_root")"
+    return 0
+  fi
+  mv "$tmp" "$map"
+  chown "$username:$username" "$map"
+}
+
+render_app_redirects_conf() {
+  local app_root="$1"
+  local nginx_conf="$2"
+  local username="$3"
+  local map conf http_port scheme ssl_cert ssl_key webroot target_url from to pairs
+  map="$(app_redirects_map_path "$app_root")"
+  conf="$(app_redirects_conf_path "$app_root")"
+  pairs="$(read_app_redirects "$map")"
+  if [ -z "$pairs" ]; then
+    rm -f "$conf"
+    return 0
+  fi
+
+  http_port="$(app_http_port_from_nginx "$nginx_conf")"
+  scheme="http"
+  ssl_cert=""
+  ssl_key=""
+  if grep -q 'listen 443' "$nginx_conf"; then
+    scheme="https"
+    ssl_cert="$(app_ssl_cert_from_nginx "$nginx_conf")"
+    ssl_key="$(app_ssl_key_from_nginx "$nginx_conf")"
+    if [ -z "$ssl_cert" ] || [ -z "$ssl_key" ]; then
+      echo "Error: HTTPS is enabled but certificate paths were not found in $nginx_conf"
+      exit 1
+    fi
+  fi
+  webroot="${app_root}/current/public"
+
+  {
+    echo "# Managed by server-tool. Host redirects for this application."
+    while read -r from to; do
+      [ -n "$from" ] || continue
+      target_url="$(redirect_request_origin "$scheme" "$to" "$http_port")"
+      printf '\nserver {\n'
+      printf '    listen %s;\n' "$http_port"
+      printf '    listen [::]:%s;\n' "$http_port"
+      printf '    server_name %s;\n' "$from"
+      printf '\n'
+      printf '    location ^~ /.well-known/acme-challenge/ {\n'
+      printf '        root %s;\n' "$webroot"
+      printf '    }\n'
+      printf '\n'
+      printf '    location / {\n'
+      printf '        return 301 %s$request_uri;\n' "$target_url"
+      printf '    }\n'
+      printf '}\n'
+      if [ "$scheme" = "https" ]; then
+        printf '\nserver {\n'
+        printf '    listen 443 ssl;\n'
+        printf '    listen [::]:443 ssl;\n'
+        printf '    server_name %s;\n' "$from"
+        printf '\n'
+        printf '    ssl_certificate     %s;\n' "$ssl_cert"
+        printf '    ssl_certificate_key %s;\n' "$ssl_key"
+        printf '\n'
+        printf '    return 301 %s$request_uri;\n' "$target_url"
+        printf '}\n'
+      fi
+    done <<< "$pairs"
+  } > "${conf}.tmp.$$"
+  mv "${conf}.tmp.$$" "$conf"
+  chown "$username:$username" "$map" "$conf"
+}
+
+refresh_app_certificate() {
+  local username="$1"
+  local app_name="$2"
+  local app_root="$3"
+  local conf="$4"
+  local mode="$5"
+  local email="${6:-}"
+  local names lineage ssl_cert ssl_key cn ordered name
+
+  case "$mode" in
+    expand|replace) ;;
+    *)
+      echo "Error: unknown certificate mode '$mode'."
+      exit 1
+      ;;
+  esac
+
+  if ! grep -q 'listen 443' "$conf"; then
+    return 0
+  fi
+
+  ssl_cert="$(app_ssl_cert_from_nginx "$conf")"
+  ssl_key="$(app_ssl_key_from_nginx "$conf")"
+  if [ -z "$ssl_cert" ] || [ -z "$ssl_key" ]; then
+    echo "Error: HTTPS is enabled but certificate paths were not found in $conf"
+    exit 1
+  fi
+
+  names="$(app_certificate_names "$conf" "$app_root")"
+  if [ -z "$names" ]; then
+    echo "Error: certificate name list cannot be empty."
+    exit 1
+  fi
+
+  if lineage="$(app_letsencrypt_lineage "$conf")"; then
+    # shellcheck disable=SC2086
+    sync_app_letsencrypt_names "$username" "$app_name" "$app_root" "$lineage" "$ssl_cert" "$ssl_key" "$mode" "$email" $names
+    return 0
+  fi
+
+  cn="$(app_server_name_from_nginx "$conf")"
+  if [ -z "$cn" ]; then
+    cn="${names%% *}"
+  fi
+  ordered="$cn"
+  for name in $names; do
+    ordered="$(append_unique_name "$ordered" "$name")"
+  done
+  echo "Creating self-signed certificate..."
+  # shellcheck disable=SC2086
+  write_self_signed_certificate "$ssl_cert" "$ssl_key" $ordered
+  chmod 640 "$ssl_cert" "$ssl_key"
+  chown "$username:$username" "$(dirname "$ssl_cert")" "$ssl_cert" "$ssl_key"
 }
 
 nginx_php_mode_is_valid() {

@@ -113,6 +113,11 @@ server-tool enable-ssl <username> <application> [-d <domain>] [-e <email>] [--se
 server-tool add-domain <username> <application> <domain> [-y]
 server-tool list-domains <username> <application>
 server-tool remove-domain <username> <application> <domain> [-y]
+server-tool add-redirect <username> <application> <from> <to> [-y]
+server-tool add-redirect <username> <application> --www <apex> [-y]
+server-tool add-redirect <username> <application> --to-www <apex> [-y]
+server-tool list-redirects <username> <application>
+server-tool remove-redirect <username> <application> <from> [-y]
 server-tool check-certbot-renew [-y]
 server-tool enable-basic-auth <username> <application> <auth_user> [-r <realm>] [--except <path>] [-y]
 server-tool enable-basic-auth testdev demo tester -r Staging --except /webhooks --except /up -y

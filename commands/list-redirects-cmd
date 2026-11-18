@@ -1,0 +1,14 @@
+#!/bin/bash
+set -eo pipefail
+
+usage="Usage: server-tool list-redirects <username> <application>"
+if [ $# -ne 2 ]; then
+  echo "$usage"
+  exit 1
+fi
+
+username="$1"
+app_name="$2"
+require_application "$username" "$app_name"
+
+read_app_redirects "$(app_redirects_map_path "$APP_ROOT")" | sort -k1,1
